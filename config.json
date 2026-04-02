@@ -1,0 +1,24 @@
+{
+    "items": [
+        {
+            "id": "wives_file",
+            "name": "女主名单存储文件",
+            "description": "默认为 wives.txt，建议保持默认以便于数据迁移",
+            "type": "string",
+            "default": "wives.txt"
+        },
+        {
+            "id": "spots_file",
+            "name": "圣地巡礼存储文件",
+            "description": "存放圣地坐标的文本文件",
+            "type": "string",
+            "default": "spots.txt"
+        },
+        {
+            "id": "notice",
+            "name": "配置说明",
+            "description": "修改 TXT 文件或网页配置后，请在群内发送 /重载Gal数据 即可生效。",
+            "type": "hint"
+        }
+    ]
+}
