@@ -6,23 +6,24 @@ from astrbot.api.star import Context, Star
 class GalUniversePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
-        self.reload_data()   # 启动时立即加载
+        self.reload_data()
 
     def reload_data(self):
-        """强制从最新 config 读取数据"""
-        config = self.context.get_config()   # 每次都重新获取最新配置
+        """每次都强制从最新配置读取数据"""
+        config = self.context.get_config()
         
         # 老婆列表
         self.heroines = config.get("heroines", ["古河渚 (CLANNAD)"])
-        if not isinstance(self.heroines, list) or len(self.heroines) == 0:
+        if not isinstance(self.heroines, list):
             self.heroines = ["古河渚 (CLANNAD)"]
 
-        # 圣地巡礼列表 - 加强解析容错
+        # 圣地巡礼 - 兼容 template_list 格式
         spots_list = config.get("spots", [])
         self.spots = {}
         for item in spots_list:
-            if isinstance(item, dict) and isinstance(item.get("name"), str):
-                name = item["name"].strip()
+            if isinstance(item, dict):
+                # 支持有 __template_key 的情况
+                name = str(item.get("name", "")).strip()
                 if name:
                     key = name.upper()
                     self.spots[key] = {
@@ -34,7 +35,8 @@ class GalUniversePlugin(Star):
 
     @filter.command("今日老婆")
     async def daily_wife(self, event: AstrMessageEvent):
-        if not self.context.get_config().get("enable_fortunes", True):
+        config = self.context.get_config()
+        if not config.get("enable_fortunes", True):
             yield event.plain_result("❌ 该功能已被管理员禁用。")
             return
 
@@ -45,7 +47,12 @@ class GalUniversePlugin(Star):
         wife = random.choice(self.heroines)
         fortune = random.choice(self.fortunes)
         
-        res = f"✨ --- 今日 Gal 运势 --- ✨\n👤 角色：{wife}\n🧧 签运：【{fortune}】\n📝 建议：今天和这位角色相处会有意想不到的惊喜哦！"
+        res = (
+            f"✨ --- 今日 Gal 运势 --- ✨\n"
+            f"👤 角色：{wife}\n"
+            f"🧧 签运：【{fortune}】\n"
+            f"📝 建议：今天和这位角色相处会有意想不到的惊喜哦！"
+        )
         yield event.plain_result(res)
 
     @filter.command("圣地巡礼")
@@ -55,15 +62,15 @@ class GalUniversePlugin(Star):
             return
 
         query = game_name.strip().upper()
-        # 更宽松的匹配
-        matched = next((k for k in self.spots if query == k or query in k or k in query), None)
+        # 宽松匹配
+        matched_key = next((k for k in self.spots if query == k or query in k or k in query), None)
 
-        if matched:
-            info = self.spots[matched]
-            res = f"🗺️ 《{matched}》圣地情报：\n📍 地点：{info['desc']}\n🔗 详情：{info.get('link', '暂无链接')}"
+        if matched_key:
+            info = self.spots[matched_key]
+            res = f"🗺️ 《{matched_key}》圣地情报：\n📍 地点：{info['desc']}\n🔗 详情：{info.get('link', '暂无链接')}"
             yield event.plain_result(res)
         else:
-            yield event.plain_result(f"暂未收录《{game_name}》。\n当前共收录 {len(self.spots)} 个圣地")
+            yield event.plain_result(f"暂未收录《{game_name}》。\n当前共收录圣地：{len(self.spots)} 个")
 
     @filter.command("重载Gal数据")
     async def reload_cmd(self, event: AstrMessageEvent):
