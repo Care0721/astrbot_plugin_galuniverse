@@ -5,7 +5,7 @@ from datetime import datetime
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 
-@register("gal_universe_pro", "Developer", "Galgame 沉浸式助手增强版", "1.4.0")
+@register("gal_universe_pro", "Care", "如果在梦里能相遇的话，那大概就是现实。", "1.7.0")
 class GalUniversePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
