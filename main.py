@@ -60,7 +60,7 @@ class GalUniversePlugin(Star):
     async def pilgrimage(self, event: AstrMessageEvent, game_name: str = None):
         """查询巡礼地点"""
         if not game_name:
-            yield event.plain_result("请输入游戏名，如：/圣地巡礼 CLANNAD")
+            yield event.plain_result("请输入游戏名，如：moni圣地巡礼 CLANNAD")
             return
 
         query = game_name.upper()
