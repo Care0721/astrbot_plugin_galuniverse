@@ -4,7 +4,6 @@ import logging
 from datetime import datetime
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
-from astrbot.api.model import MessageChain
 
 @register("gal_universe_pro", "Developer", "Galgame 沉浸式助手增强版", "1.4.0")
 class GalUniversePlugin(Star):
