@@ -5,7 +5,7 @@
     "default": true
   },
   "heroines": {
-    "description": "今日老婆角色列表（可直接在网页添加、删除、修改角色名）",
+    "description": "今日老婆角色列表",
     "type": "list",
     "default": [
       "古河渚 (CLANNAD)",
@@ -14,14 +14,14 @@
     ]
   },
   "spots": {
-    "description": "圣地巡礼地点列表（网页端表格化编辑）",
+    "description": "圣地巡礼地点列表（网页端表格添加）",
     "type": "template_list",
     "templates": {
       "spot": {
         "name": "一条圣地巡礼",
         "items": {
           "name": {
-            "description": "游戏名（用于匹配指令）",
+            "description": "游戏名（用于匹配，如 魔法使之夜）",
             "type": "string"
           },
           "desc": {
@@ -40,7 +40,13 @@
         "__template_key": "spot",
         "name": "CLANNAD",
         "desc": "京都动画圣地 / 古河家面包店",
-        "link": "https://example.com/clannad-pilgrimage"
+        "link": "https://example.com/clannad"
+      },
+      {
+        "__template_key": "spot",
+        "name": "魔法使之夜",
+        "desc": "魔法使之夜相关圣地（monogatari系列取景地）",
+        "link": "https://example.com/mahou"
       }
     ]
   }
