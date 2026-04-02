@@ -14,7 +14,7 @@ try:
 except ImportError:
     StarTools = None
 
-@register("astrbot_plugin_universe", "Care", "超硬核 Galgame 沉浸式助手", "1.7.4")
+@register("astrbot_plugin_universe", "Care", "如果在梦里能相遇的话，那大概就是现实", "1.8.0")
 class GalUniversePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
