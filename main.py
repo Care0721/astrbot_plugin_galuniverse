@@ -1,112 +1,130 @@
 import random
-import json
 import os
+import logging
 from datetime import datetime
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import Context, Star
+from astrbot.api.star import Context, Star, register
+from astrbot.api.model import MessageChain
 
+@register("gal_universe_pro", "Developer", "Galgame 沉浸式助手增强版", "1.4.0")
 class GalUniversePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.base_path = os.path.dirname(__file__)
+        self.logger = logging.getLogger("astrbot")
         
-        # 新增：两个持久化备份文件（专门存放网页端配置的数据）
-        self.data_dir = os.path.join("data", "plugins_data", "gal_universe_pro")
-        os.makedirs(self.data_dir, exist_ok=True)
-        
-        self.web_heroines_file = os.path.join(self.data_dir, "web_heroines.json")
-        self.web_spots_file = os.path.join(self.data_dir, "web_spots.json")
-        
+        # 默认配置初始化
+        self._ensure_files_exist()
         self.reload_data()
 
-    def reload_data(self):
-        """优先从网页配置加载 + 自动备份到两个JSON文件"""
-        config = self.context.get_config()
-        
-        # 1. 从网页端加载老婆列表
-        self.heroines = config.get("heroines", ["古河渚 (CLANNAD)"])
-        if not isinstance(self.heroines, list) or len(self.heroines) == 0:
-            self.heroines = ["古河渚 (CLANNAD)"]
-        
-        # 2. 从网页端加载圣地巡礼（兼容 template_list）
-        spots_list = config.get("spots", [])
-        self.spots = {}
-        for item in spots_list:
-            if isinstance(item, dict) and "name" in item:
-                name = str(item.get("name", "")).strip()
-                if name:
-                    key = name.upper()
-                    self.spots[key] = {
-                        "desc": item.get("desc", "暂无描述"),
-                        "link": item.get("link", "")
-                    }
-        
-        # 3. 自动把当前网页数据备份到两个JSON文件
-        self._save_web_backup()
-        
-        self.fortunes = ["超大吉", "大吉", "中吉", "小吉", "末吉", "平", "凶", "大凶"]
+    def _ensure_files_exist(self):
+        """检查并初始化数据文件"""
+        files = {
+            "wives.txt": "古河渚 (CLANNAD)\n冬马和纱 (白色相簿2)\n小木曾雪菜 (白色相簿2)",
+            "spots.txt": "CLANNAD|东京都瑞穗町长冈(古河面包店)|https://zh.moegirl.org.cn/CLANNAD/圣地巡礼"
+        }
+        for name, content in files.items():
+            path = os.path.join(self.base_path, name)
+            if not os.path.exists(path):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
 
-    def _save_web_backup(self):
-        """把网页配置的数据保存到两个独立JSON文件"""
-        # 保存老婆列表
-        with open(self.web_heroines_file, "w", encoding="utf-8") as f:
-            json.dump(self.heroines, f, ensure_ascii=False, indent=2)
+    def reload_data(self):
+        """从网页配置或本地文件加载数据"""
+        conf = self.context.get_config()
+        self.wives_file = conf.get("wives_file", "wives.txt")
+        self.spots_file = conf.get("spots_file", "spots.txt")
         
-        # 保存圣地巡礼（带 __template_key 结构，方便以后恢复）
-        spots_list = []
-        for key, info in self.spots.items():
-            spots_list.append({
-                "__template_key": "spot",
-                "name": key,
-                "desc": info["desc"],
-                "link": info["link"]
-            })
-        with open(self.web_spots_file, "w", encoding="utf-8") as f:
-            json.dump(spots_list, f, ensure_ascii=False, indent=2)
+        # 加载女主列表
+        w_path = os.path.join(self.base_path, self.wives_file)
+        with open(w_path, "r", encoding="utf-8") as f:
+            self.heroines = [line.strip() for line in f if line.strip()]
+            
+        # 加载圣地数据
+        s_path = os.path.join(self.base_path, self.spots_file)
+        self.spots_db = {}
+        with open(s_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if "|" in line:
+                    parts = line.strip().split("|")
+                    if len(parts) >= 3:
+                        self.spots_db[parts[0].upper()] = {"desc": parts[1], "link": parts[2]}
 
     @filter.command("今日老婆")
     async def daily_wife(self, event: AstrMessageEvent):
-        if not self.context.get_config().get("enable_fortunes", True):
-            yield event.plain_result("❌ 该功能已被管理员禁用。")
-            return
-
-        user_id = event.get_sender_id()
+        """获取每日专属 Galgame 运势"""
+        uid = event.get_sender_id()
         today = datetime.now().strftime("%Y%m%d")
-        random.seed(f"{user_id}_{today}")
+        
+        # 使用 UID 和日期锁定每日结果
+        random.seed(f"{uid}_{today}")
         
         wife = random.choice(self.heroines)
-        fortune = random.choice(self.fortunes)
-        
+        fortunes = ["超大吉", "大吉", "中吉", "小吉", "末吉", "平", "凶"]
+        colors = ["樱花粉", "纯净白", "薄荷绿", "深海蓝", "夕阳橘", "星空紫"]
+        tips = [
+            "今天推个人线会有意想不到的展开！",
+            "适合去圣地巡礼，呼吸二次元的空气。",
+            "小心坏档，记得多存几个存档位。",
+            "今日宜表白，成功率提升 50%！"
+        ]
+
         res = (
             f"✨ --- 今日 Gal 运势 --- ✨\n"
-            f"👤 角色：{wife}\n"
-            f"🧧 签运：【{fortune}】\n"
-            f"📝 建议：今天和这位角色相处会有意想不到的惊喜哦！"
+            f"👤 羁绊角色：{wife}\n"
+            f"🧧 签运等级：【{random.choice(fortunes)}】\n"
+            f"🎨 幸运色彩：{random.choice(colors)}\n"
+            f"📝 寄语：{random.choice(tips)}"
         )
         yield event.plain_result(res)
 
     @filter.command("圣地巡礼")
-    async def pilgrimage(self, event: AstrMessageEvent, game_name: str = None):
-        if not game_name:
-            yield event.plain_result("请输入游戏名，例如：/圣地巡礼 魔法使之夜")
+    async def pilgrimage(self, event: AstrMessageEvent, game: str = None):
+        """查询圣地坐标"""
+        if not game:
+            yield event.plain_result("💡 请输入游戏名。示例：/圣地巡礼 CLANNAD")
             return
 
-        query = game_name.strip().upper()
-        matched_key = next((k for k in self.spots if query == k or query in k or k in query), None)
-
-        if matched_key:
-            info = self.spots[matched_key]
-            res = f"🗺️ 《{matched_key}》圣地情报：\n📍 地点：{info['desc']}\n🔗 详情：{info.get('link', '暂无链接')}"
-            yield event.plain_result(res)
+        query = game.upper()
+        # 模糊匹配
+        match = next((k for k in self.spots_db if query in k), None)
+        
+        if match:
+            data = self.spots_db[match]
+            yield event.plain_result(f"🗺️ 《{match}》圣地情报：\n📍 地点：{data['desc']}\n🔗 链接：{data['link']}")
         else:
-            yield event.plain_result(f"暂未收录《{game_name}》。\n当前共收录圣地：{len(self.spots)} 个")
+            yield event.plain_result(f"🔍 没找到《{game}》的记录。你可以尝试更短的关键词。")
+
+    @filter.command("添加老婆")
+    async def add_wife(self, event: AstrMessageEvent, name: str):
+        """(管理员) 动态添加女主"""
+        if not event.is_from_admin(): return # 权限检查
+        
+        path = os.path.join(self.base_path, self.wives_file)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"\n{name}")
+        
+        self.reload_data()
+        yield event.plain_result(f"✅ 已成功将【{name}】加入后宫名单！")
+
+    @filter.command("添加圣地")
+    async def add_spot(self, event: AstrMessageEvent, content: str):
+        """(管理员) 格式：游戏名|描述|链接"""
+        if not event.is_from_admin(): return
+        
+        if "|" not in content:
+            yield event.plain_result("❌ 格式错误！请使用：游戏名|描述|链接")
+            return
+
+        path = os.path.join(self.base_path, self.spots_file)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"\n{content}")
+        
+        self.reload_data()
+        yield event.plain_result("✅ 圣地坐标已收录！")
 
     @filter.command("重载Gal数据")
     async def reload_cmd(self, event: AstrMessageEvent):
+        """强制同步网页配置与本地文件"""
         self.reload_data()
-        yield event.plain_result(
-            f"✅ 数据已从网页配置重新加载并备份！\n"
-            f"当前老婆：{len(self.heroines)} 个\n"
-            f"当前圣地：{len(self.spots)} 个\n"
-            f"备份文件已生成在：data/plugins_data/gal_universe_pro/"
-        )
+        yield event.plain_result("🔄 数据已完成热重载！")
