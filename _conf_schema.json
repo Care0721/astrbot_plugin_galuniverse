@@ -1,29 +1,17 @@
 {
   "enable_fortunes": {
-    "description": "是否启用「今日老婆」运势功能",
+    "description": "是否启用今日老婆功能",
     "type": "bool",
     "default": true
   },
   "heroines": {
-    "description": "今日老婆角色列表（网页添加/删除）",
+    "description": "老婆角色列表（一行一个角色名）",
     "type": "list",
-    "default": [
-      "古河渚 (CLANNAD)"
-    ]
+    "default": ["古河渚 (CLANNAD)"]
   },
   "spots": {
-    "description": "圣地巡礼列表（网页表格添加）",
-    "type": "template_list",
-    "templates": {
-      "spot": {
-        "name": "圣地巡礼条目",
-        "items": {
-          "name": { "description": "游戏名称", "type": "string" },
-          "desc": { "description": "地点描述", "type": "string" },
-          "link": { "description": "详情链接（可选）", "type": "string" }
-        }
-      }
-    },
+    "description": "圣地巡礼列表（每项是一个对象）",
+    "type": "list",
     "default": []
   }
 }
