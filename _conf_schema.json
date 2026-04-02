@@ -1,0 +1,48 @@
+{
+  "enable_fortunes": {
+    "description": "是否启用「今日老婆」运势功能",
+    "type": "bool",
+    "default": true
+  },
+  "heroines": {
+    "description": "今日老婆角色列表（可直接在网页添加、删除、修改角色名）",
+    "type": "array",
+    "items": {
+      "type": "string"
+    },
+    "default": [
+      "古河渚 (CLANNAD)",
+      "立华奏 (Angel Beats!)",
+      "五更琉璃 (我的妹妹不可能那么可爱)"
+    ]
+  },
+  "spots": {
+    "description": "圣地巡礼地点列表（可直接在网页添加、删除、修改每一条目）",
+    "type": "array",
+    "items": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "游戏名（用于匹配）"
+        },
+        "desc": {
+          "type": "string",
+          "description": "地点描述"
+        },
+        "link": {
+          "type": "string",
+          "description": "详情链接"
+        }
+      },
+      "required": ["name"]
+    },
+    "default": [
+      {
+        "name": "CLANNAD",
+        "desc": "京都动画圣地 / 古河家面包店",
+        "link": "https://example.com/clannad-pilgrimage"
+      }
+    ]
+  }
+}
