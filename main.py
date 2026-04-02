@@ -1,51 +1,38 @@
 import random
-import os
 from datetime import datetime
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import Context, Star, register
-from astrbot.api.all import Config
+from astrbot.api.star import Context, Star
 
-@register("gal_universe_pro", "YourName", "Galgame 沉浸式助手网页配置版", "1.3.0")
+
 class GalUniversePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
-        self.base_path = os.path.dirname(__file__)
         
-        # --- 网页端配置项定义 ---
-        # 这里的 key 对应网页上的输入框
+        # 加载网页端配置（所有功能数据现在都可通过网页直接修改）
         self.config_data = self.context.get_config()
-        self.wives_file_name = self.config_data.get("wives_file", "wives.txt")
-        self.spots_file_name = self.config_data.get("spots_file", "spots.txt")
-        self.enable_fortunes = self.config_data.get("enable_fortunes", True)
-
+        
         # 加载数据
         self.reload_data()
 
     def reload_data(self):
-        """加载或重载 TXT 数据"""
-        wives_path = os.path.join(self.base_path, self.wives_file_name)
-        spots_path = os.path.join(self.base_path, self.spots_file_name)
+        """从网页配置中重新加载所有功能数据"""
+        # 老婆列表（数组，可在网页添加/删除/修改角色）
+        self.heroines = self.config_data.get("heroines", ["古河渚 (CLANNAD)"])
         
-        self.heroines = self._read_lines(wives_path, ["古河渚 (CLANNAD)"])
-        self.spots = self._parse_spots(spots_path)
+        # 圣地巡礼数据（数组，每项为一个对象，可在网页添加/删除/修改）
+        spots_list = self.config_data.get("spots", [])
+        self.spots = {}
+        for item in spots_list:
+            if isinstance(item, dict) and "name" in item:
+                name = str(item["name"]).upper().strip()
+                if name:
+                    self.spots[name] = {
+                        "desc": item.get("desc", ""),
+                        "link": item.get("link", "")
+                    }
+        
+        # 签运列表（固定）
         self.fortunes = ["超大吉", "大吉", "中吉", "小吉", "末吉", "平", "凶", "大凶"]
-
-    def _read_lines(self, path, default):
-        if not os.path.exists(path): return default
-        with open(path, "r", encoding="utf-8") as f:
-            return [line.strip() for line in f.readlines() if line.strip()]
-
-    def _parse_spots(self, path):
-        data = {}
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if "|" in line:
-                        parts = line.strip().split("|")
-                        if len(parts) == 3:
-                            name, desc, link = parts
-                            data[name.upper()] = {"desc": desc, "link": link}
-        return data
 
     @filter.command("今日老婆")
     async def daily_wife(self, event: AstrMessageEvent):
@@ -92,6 +79,12 @@ class GalUniversePlugin(Star):
 
     @filter.command("重载Gal数据")
     async def reload_cmd(self, event: AstrMessageEvent):
-        """如果你手动改了TXT，执行这个命令刷新内存"""
+        """从网页配置重新加载所有数据（修改配置后执行此命令立即生效）"""
+        self.config_data = self.context.get_config()
         self.reload_data()
-        yield event.plain_result("✅ Galgame 数据库已重新加载！")
+        yield event.plain_result("✅ Galgame 所有功能数据已从网页配置重新加载！")
+
+
+# ====================== 网页端配置文件 ======================
+# 请在插件目录新建文件：_conf_schema.json
+# 内容如下（复制粘贴即可）：
