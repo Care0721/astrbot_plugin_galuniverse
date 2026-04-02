@@ -1,24 +1,87 @@
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
-from astrbot.api.star import Context, Star, register
-from astrbot.api import logger
+import random
+from datetime import datetime
+from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.star import Context, Star
 
-@register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
-class MyPlugin(Star):
+
+class GalUniversePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
+        
+        # 加载网页端配置（所有功能数据现在都可通过网页直接修改）
+        self.config_data = self.context.get_config()
+        
+        # 加载数据
+        self.reload_data()
 
-    async def initialize(self):
-        """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
+    def reload_data(self):
+        """从网页配置中重新加载所有功能数据"""
+        # 老婆列表（数组，可在网页添加/删除/修改角色）
+        self.heroines = self.config_data.get("heroines", ["古河渚 (CLANNAD)"])
+        
+        # 圣地巡礼数据（数组，每项为一个对象，可在网页添加/删除/修改）
+        spots_list = self.config_data.get("spots", [])
+        self.spots = {}
+        for item in spots_list:
+            if isinstance(item, dict) and "name" in item:
+                name = str(item["name"]).upper().strip()
+                if name:
+                    self.spots[name] = {
+                        "desc": item.get("desc", ""),
+                        "link": item.get("link", "")
+                    }
+        
+        # 签运列表（固定）
+        self.fortunes = ["超大吉", "大吉", "中吉", "小吉", "末吉", "平", "凶", "大凶"]
 
-    # 注册指令的装饰器。指令名为 helloworld。注册成功后，发送 `/helloworld` 就会触发这个指令，并回复 `你好, {user_name}!`
-    @filter.command("helloworld")
-    async def helloworld(self, event: AstrMessageEvent):
-        """这是一个 hello world 指令""" # 这是 handler 的描述，将会被解析方便用户了解插件内容。建议填写。
-        user_name = event.get_sender_name()
-        message_str = event.message_str # 用户发的纯文本消息字符串
-        message_chain = event.get_messages() # 用户所发的消息的消息链 # from astrbot.api.message_components import *
-        logger.info(message_chain)
-        yield event.plain_result(f"Hello, {user_name}, 你发了 {message_str}!") # 发送一条纯文本消息
+    @filter.command("今日老婆")
+    async def daily_wife(self, event: AstrMessageEvent):
+        """每日固定运势抽卡"""
+        if not self.config_data.get("enable_fortunes", True):
+            yield event.plain_result("❌ 该功能已被管理员禁用。")
+            return
 
-    async def terminate(self):
-        """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
+        user_id = event.get_sender_id()
+        today = datetime.now().strftime("%Y%m%d")
+        random.seed(f"{user_id}_{today}")
+        
+        wife = random.choice(self.heroines)
+        fortune = random.choice(self.fortunes)
+        
+        res = (
+            f"✨ --- 今日 Gal 运势 --- ✨\n"
+            f"👤 角色：{wife}\n"
+            f"🧧 签运：【{fortune}】\n"
+            f"📝 建议：今天和这位角色相处会有意想不到的惊喜哦！"
+        )
+        yield event.plain_result(res)
+
+    @filter.command("圣地巡礼")
+    async def pilgrimage(self, event: AstrMessageEvent, game_name: str = None):
+        """查询巡礼地点"""
+        if not game_name:
+            yield event.plain_result("请输入游戏名，如：/圣地巡礼 CLANNAD")
+            return
+
+        query = game_name.upper()
+        matched_key = next((k for k in self.spots if query in k), None)
+        
+        if matched_key:
+            info = self.spots[matched_key]
+            res = (
+                f"🗺️ 《{matched_key}》圣地情报：\n"
+                f"📍 地点：{info['desc']}\n"
+                f"🔗 详情：{info['link']}"
+            )
+            yield event.plain_result(res)
+        else:
+            yield event.plain_result(f"暂未收录《{game_name}》。")
+
+    @filter.command("重载Gal数据")
+    async def reload_cmd(self, event: AstrMessageEvent):
+        """从网页配置重新加载所有数据（修改配置后执行此命令立即生效）"""
+        self.config_data = self.context.get_config()
+        self.reload_data()
+        yield event.plain_result("✅ Galgame 所有功能数据已从网页配置重新加载！")
+
+
