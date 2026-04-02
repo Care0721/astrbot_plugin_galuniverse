@@ -6,10 +6,7 @@
   },
   "heroines": {
     "description": "今日老婆角色列表（可直接在网页添加、删除、修改角色名）",
-    "type": "array",
-    "items": {
-      "type": "string"
-    },
+    "type": "list",
     "default": [
       "古河渚 (CLANNAD)",
       "立华奏 (Angel Beats!)",
@@ -17,25 +14,26 @@
     ]
   },
   "spots": {
-    "description": "圣地巡礼地点列表（可直接在网页添加、删除、修改每一条目）",
-    "type": "array",
-    "items": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "游戏名（用于匹配）"
-        },
-        "desc": {
-          "type": "string",
-          "description": "地点描述"
-        },
-        "link": {
-          "type": "string",
-          "description": "详情链接"
+    "description": "圣地巡礼地点列表（网页端可表格化添加/修改每一条）",
+    "type": "template_list",
+    "templates": {
+      "spot": {
+        "name": "一条圣地巡礼",
+        "items": {
+          "name": {
+            "description": "游戏名（用于匹配指令）",
+            "type": "string"
+          },
+          "desc": {
+            "description": "地点描述",
+            "type": "string"
+          },
+          "link": {
+            "description": "详情链接（可选）",
+            "type": "string"
+          }
         }
-      },
-      "required": ["name"]
+      }
     },
     "default": [
       {
