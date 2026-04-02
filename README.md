@@ -1,14 +1,27 @@
-# astrbot-plugin-helloworld
-
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
-
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
-
-# Supports
-
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+# ​🎮 AstrBot-Plugin-GalVerse (Galgame 沉浸式助手)
+​“跨越次元壁，在群聊中与你的本命邂逅。”
+​本插件专为 Galgame 爱好者打造，集成了每日运势抽卡、圣地巡礼情报以及全网页端自定义配置功能。支持海量女主数据，让你在推油之余，也能在群内分享那份属于二次元的感动。
+​✨ 核心功能
+​🌸 1. 今日老婆 (Daily Wife)
+​功能描述：基于用户 ID 和日期生成的每日专属羁绊。每天 0 点刷新，每个人的“今日老婆”和“运势”都是固定且唯一的。
+​互动指令：/今日老婆
+​随机要素：
+​羁绊角色：从 wives.txt 中随机抽取一位心动女主。
+​签运等级：从【超大吉】到【大凶】的命运审判。
+​温馨建议：根据抽选结果自动生成的“推游指南”。
+​🗺️ 2. 圣地巡礼 (Pilgrimage)
+​功能描述：打破虚幻与现实的界限，为你提供 Galgame 现实取景地的精准情报与详细资料链接。
+​互动指令：/圣地巡礼 [作品名] (支持模糊搜索，如 /圣地巡礼 CL)
+​数据内容：包含作品名、现实详细地址以及萌娘百科/地图详情链接。
+​⚙️ 3. 极简配置 (Web Panel)
+​功能描述：无需接触服务器代码，直接在 AstrBot 网页管理后台修改插件行为。
+​配置项：
+​功能开关：一键启用/禁用运势功能。
+​数据解耦：自定义加载不同的 .txt 数据文件，实现不同群聊不同人设。
+​即时生效：配合 /重载Gal数据 命令，修改数据后无需重启机器人。
+​🛠️ 使用说明
+​1. 安装方法
+​在 astrbot/plugins/ 目录下新建文件夹 gal_universe。
+​将 main.py、config.json 放入文件夹。
+​确保目录下存在 wives.txt (每行一个女主名) 和 spots.txt (格式：游戏名|地点|链接)。
+​重启 AstrBot。
