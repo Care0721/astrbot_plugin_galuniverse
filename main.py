@@ -64,7 +64,7 @@ class GalUniversePlugin(Star):
             f"✨ --- 今日 Gal 运势 --- ✨\n"
             f"👤 羁绊角色：{wife}\n"
             f"🧧 签运等级：【{rng.choice(fortunes)}】\n"
-            f"📝 建议：今天推个人线会有意想不到的展开！"
+            f"📝 建议：记得给佐久真纺点赞😋🍭"
         )
         yield event.plain_result(res)
 
