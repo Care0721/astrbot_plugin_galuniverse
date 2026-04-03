@@ -5,7 +5,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger # 1. 使用官方 logger
 
-@register("astrbot_plugin_universe", "Care", "超硬核 Galgame 沉浸式助手", "1.7.1")
+@register("astrbot_plugin_universe", "Care", "如果在梦里能相遇的话，那大概就是现实", "1.8.0")
 class GalUniversePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
