@@ -1,6 +1,6 @@
 # GalUniverse Pro - Galgame 
 
-##本插件已经停止维护
+## 本插件已经停止维护
 
 **一个专为 Galgame（视觉小说）玩家打造的沉浸式助手插件**
 
