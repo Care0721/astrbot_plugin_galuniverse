@@ -20,11 +20,19 @@ from urllib.parse import urlparse
 from .store import norm
 
 BGM_API_BASE = "https://api.bgm.tv"
+"""Bangumi 官方 API，始终作为最后一层兜底。"""
+
+BGM_API_MIRRORS = ("https://bgmapi.sakuraspark.fun",)
+"""Bangumi API 反代。官方域名在部分网络环境下不可达，优先走镜像。"""
+
 BGM_IMAGE_MIRRORS = (
+    "https://bgmimg.sakuraspark.fun",
     "https://bgmlain.waterbee.cc",
     "https://bgm.sakuraspark.fun",
 )
-USER_AGENT = "CareGalUniverse/2.0.1 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
+"""图片镜像：按顺序尝试，全部失败后回源官方。"""
+
+USER_AGENT = "CareGalUniverse/2.0.3 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_BYTES = 8 * 1024 * 1024
 MISS_TTL = 86400
@@ -56,13 +64,14 @@ class ImageFetcher:
         source: str = "auto",
         cache_days: int = 30,
         timeout: float = 6.0,
-        api_base: str = BGM_API_BASE,
+        api_bases: list[str] | str | None = None,
+        api_base: str | None = None,
         mirrors: list[str] | str | None = None,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.local_dir = Path(local_dir) if local_dir else None
         self.source = source if source in {"auto", "bangumi", "local", "off"} else "auto"
-        self.api_base = (api_base or BGM_API_BASE).rstrip("/")
+        self.api_bases = self._normalize_api_bases(api_bases, api_base)
         self.mirrors = self._normalize_mirrors(mirrors)
         self.cache_seconds = max(1, int(cache_days)) * 86400
         self.timeout = max(1.0, float(timeout))
@@ -70,7 +79,11 @@ class ImageFetcher:
 
     # ---------------- 对外入口 ----------------
 
-    async def fetch(self, name: str, work: str = "") -> Path | None:
+    async def fetch(self, name: str, work: str = "", image_url: str = "") -> Path | None:
+        """取立绘：本地 → 缓存 → miss → 在线下载。
+
+        ``image_url`` 由 Bangumi 角色池直接给出时跳过搜索，少打一次接口。
+        """
         if self.source == "off" or not name.strip():
             return None
 
@@ -91,10 +104,27 @@ class ImageFetcher:
             cached = self._find_cached(name)
             if cached:
                 return cached
+            if image_url:
+                path = await self._download_direct(name, image_url)
+                if path:
+                    return path
             path = await self._download_from_bangumi(name)
             if path is None:
                 self._mark_miss(name)
             return path
+
+    async def _download_direct(self, name: str, image_url: str) -> Path | None:
+        try:
+            import aiohttp
+        except ImportError:
+            return None
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        headers = {"User-Agent": USER_AGENT}
+        try:
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+                return await self._download(session, image_url, name)
+        except Exception:
+            return None
 
     # ---------------- 本地 ----------------
 
@@ -122,19 +152,49 @@ class ImageFetcher:
     # ---------------- 镜像 ----------------
 
     @staticmethod
-    def _normalize_mirrors(mirrors: list[str] | str | None) -> list[str]:
-        if mirrors is None:
-            return list(BGM_IMAGE_MIRRORS)
-        if isinstance(mirrors, str):
-            raw = mirrors.replace("，", ",").replace("\n", ",").split(",")
+    def _split_values(values: list[str] | str | None) -> list[str]:
+        if values is None:
+            return []
+        if isinstance(values, str):
+            raw = values.replace("，", ",").replace("\n", ",").split(",")
         else:
-            raw = list(mirrors)
+            raw = list(values)
         result: list[str] = []
         for item in raw:
             value = str(item).strip().rstrip("/")
             if value and value not in result:
                 result.append(value)
         return result
+
+    @classmethod
+    def _normalize_mirrors(cls, mirrors: list[str] | str | None) -> list[str]:
+        if mirrors is None:
+            return list(BGM_IMAGE_MIRRORS)
+        return cls._split_values(mirrors)
+
+    @classmethod
+    def _normalize_api_bases(
+        cls,
+        api_bases: list[str] | str | None,
+        api_base: str | None = None,
+    ) -> list[str]:
+        """API 地址列表：镜像优先，官方恒定兜底。
+
+        - 未配置 → 内置镜像 + 官方；
+        - 配置了 ``api_bases``（列表）→ 配置项 + 官方；
+        - 只配置了旧版 ``api_base``（字符串）→ 该地址 + 官方。
+        """
+        configured = cls._split_values(api_bases)
+        if not configured:
+            legacy = cls._split_values(api_base)
+            configured = legacy or list(BGM_API_MIRRORS)
+        if BGM_API_BASE not in configured:
+            configured.append(BGM_API_BASE)
+        return configured
+
+    def api_candidates(self) -> list[str]:
+        """角色搜索的接口候选顺序。"""
+        return list(self.api_bases)
 
     def mirror_candidates(self, url: str) -> list[str]:
         """按配置顺序生成候选地址，最后回源官方。"""
@@ -178,6 +238,7 @@ class ImageFetcher:
     # ---------------- 网络 ----------------
 
     async def _download_from_bangumi(self, name: str) -> Path | None:
+        """接口按「镜像 → 官方」逐个试；取到图片地址后再按镜像顺序下载。"""
         try:
             import aiohttp
         except ImportError:
@@ -187,21 +248,28 @@ class ImageFetcher:
         headers = {"User-Agent": USER_AGENT, "Content-Type": "application/json"}
         try:
             async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-                image_url = await self._search_image_url(session, name)
-                if not image_url:
-                    return None
-                return await self._download(session, image_url, name)
+                for base in self.api_candidates():
+                    image_url = await self._search_image_url(session, base, name)
+                    if not image_url:
+                        continue
+                    path = await self._download(session, image_url, name)
+                    if path:
+                        return path
         except Exception:
             return None
+        return None
 
-    async def _search_image_url(self, session, name: str) -> str:
+    async def _search_image_url(self, session, base: str, name: str) -> str:
         payload = {"keyword": name, "filter": {"nsfw": False}}
-        async with session.post(
-            f"{self.api_base}/v0/search/characters?limit=5", json=payload
-        ) as resp:
-            if resp.status != 200:
-                return ""
-            data = await resp.json(content_type=None)
+        try:
+            async with session.post(
+                f"{base.rstrip('/')}/v0/search/characters?limit=5", json=payload
+            ) as resp:
+                if resp.status != 200:
+                    return ""
+                data = await resp.json(content_type=None)
+        except Exception:
+            return ""
 
         items = data.get("data") if isinstance(data, dict) else data
         if not isinstance(items, list) or not items:

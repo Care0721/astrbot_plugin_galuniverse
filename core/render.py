@@ -40,7 +40,7 @@ def daily_card(
     can_reroll: bool = True,
     spot: Spot | None = None,
     spot_total: int = 0,
-    link_style: str = "domain",
+    link_style: str = "full",
 ) -> str:
     emoji, _ = fortune_style(fortune)
     body = [
@@ -73,12 +73,14 @@ def spot_card(
     spots: list[Spot],
     page: int,
     total_pages: int,
-    link_style: str = "domain",
+    link_style: str = "full",
     keyword: str = "",
 ) -> str:
     body: list[str] = []
     for index, spot in enumerate(spots, 1):
         body.append(f"{numbered(index)} {spot.name}")
+        if spot.region:
+            body.append(f"   📍 {spot.region}")
         link = short_link(spot.link, link_style)
         if link:
             body.append(f"   🔗 {link}")
@@ -180,7 +182,7 @@ def help_card(stats: dict[str, int] | None = None, prefix: str = "/") -> str:
         f"· {p}gal 添加老婆 <名字>",
         f"· {p}gal 添加圣地 作品|地点|链接",
         f"· {p}gal 删除老婆|圣地 <关键词>",
-        f"· {p}gal 重载 / 导入 / 统计",
+        f"· {p}gal 重载 / 导入 / 统计 / 诊断",
     ]
     footer: list[str] = []
     if stats:
@@ -197,6 +199,15 @@ def stats_card(stats: dict[str, int], data_path: str) -> str:
         f"📚 作品 {stats.get('works', 0)} 部",
     ]
     return card("📊 GalUniverse 数据", body, [f"💾 {short_path(data_path)}"])
+
+
+def diagnose_card(rows: list[tuple[str, str]], warnings: list[str]) -> str:
+    """自检卡片：把运行环境的关键事实摊开，方便排查「更新不了 / 没图」类问题。"""
+    body = [f"{key} · {value}" for key, value in rows]
+    footer = [f"⚠️ {w}" for w in warnings]
+    if not footer:
+        footer = ["✅ 未发现遗留目录冲突"]
+    return card("🩺 GalUniverse 自检", body, footer)
 
 
 # ---------------- 分页 ----------------

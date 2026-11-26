@@ -26,6 +26,8 @@ STATE_FILE = "state.json"
 LEGACY_FILES = ("wives.txt", "spots.txt")
 MAX_SPOTS = 5000
 MAX_HEROINES = 5000
+THIN_POOL = 50
+"""名单少于这个数量就认为「数据没迁移成功」，自动补入内置角色。"""
 
 
 @dataclass
@@ -336,6 +338,69 @@ class GalStore:
             self.save()
         return added_h, added_s
 
+    def merge_payload(self, payload: dict) -> tuple[int, int]:
+        """把任意 gal.json 结构里的条目补进来（幂等），返回 (新增女主, 新增圣地)。"""
+        added_h = added_s = 0
+        for raw in payload.get("heroines") or []:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                heroine = Heroine.from_dict(raw)
+            except (TypeError, ValueError):
+                continue
+            if not heroine.name or heroine.key in self._heroine_keys:
+                continue
+            if len(self.heroines) >= MAX_HEROINES:
+                break
+            self.heroines.append(heroine)
+            self._heroine_keys.add(heroine.key)
+            added_h += 1
+        for raw in payload.get("spots") or []:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                spot = Spot.from_dict(raw)
+            except (TypeError, ValueError):
+                continue
+            if not spot.work or not spot.name or spot.key in self._spot_keys:
+                continue
+            if len(self.spots) >= MAX_SPOTS:
+                break
+            self.spots.append(spot)
+            self._spot_keys.add(spot.key)
+            added_s += 1
+        if added_h or added_s:
+            self.save()
+        return added_h, added_s
+
+    def merge_builtin_defaults(self, thin: int = THIN_POOL) -> int:
+        """名单异常稀少时补入内置角色，避免「抽来抽去就那几个」。
+
+        只在女主数量低于 ``thin`` 时触发，正常使用的用户不受影响；
+        用户自己删掉的条目不会被反复复活（只在数据明显残缺时兜底一次）。
+        """
+        if len(self.heroines) >= thin:
+            return 0
+        added, _ = self.merge_payload(self._read_defaults())
+        return added
+
+    def import_from_dirs(self, dirs: Iterable[Path]) -> tuple[int, int]:
+        """从旧插件名遗留的数据目录补录数据。
+
+        插件改名（astrbot_plugin_galuniverse → astrbot_plugin_universe）后，
+        旧数据躺在另一个 plugin_data 子目录里，这里做一次幂等合并。
+        """
+        added_h = added_s = 0
+        for directory in dirs:
+            path = Path(directory) / DATA_FILE
+            if not path.is_file() or path.resolve() == self.path.resolve():
+                continue
+            payload = self._read_json(path)
+            h, s = self.merge_payload(payload)
+            added_h += h
+            added_s += s
+        return added_h, added_s
+
     def stats(self) -> dict[str, int]:
         return {
             "heroines": len(self.heroines),
@@ -363,10 +428,11 @@ class StateStore:
         except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             self.data = {}
 
-    def save(self) -> None:
-        today = time.strftime("%Y-%m-%d")
-        # 只保留最近 2 天的记录，防止无限膨胀
-        self.data = {k: v for k, v in self.data.items() if v.get("date") in (today,)}
+    def save(self, today: str | None = None) -> None:
+        """保存状态；``today`` 传入插件配置时区的当天日期，避免时区错位误删记录。"""
+        keep = today or time.strftime("%Y-%m-%d")
+        # 只保留当天记录，防止无限膨胀
+        self.data = {k: v for k, v in self.data.items() if v.get("date") == keep}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), prefix=".state-", suffix=".tmp")
         try:
@@ -387,5 +453,5 @@ class StateStore:
     def mark_reroll(self, key: str, today: str) -> int:
         used = self.reroll_used(key, today) + 1
         self.data[key] = {"date": today, "reroll": used}
-        self.save()
+        self.save(today)
         return used

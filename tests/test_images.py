@@ -48,21 +48,55 @@ class TestMirror(unittest.TestCase):
 
     def test_constructor_defaults(self):
         f = ImageFetcher(cache_dir=Path(tempfile.mkdtemp()))
-        self.assertEqual(f.api_base, "https://api.bgm.tv")
+        # 镜像优先，官方恒定兜底
+        self.assertEqual(
+            f.api_candidates(),
+            ["https://bgmapi.sakuraspark.fun", "https://api.bgm.tv"],
+        )
         self.assertEqual(
             f.mirrors,
-            ["https://bgmlain.waterbee.cc", "https://bgm.sakuraspark.fun"],
+            [
+                "https://bgmimg.sakuraspark.fun",
+                "https://bgmlain.waterbee.cc",
+                "https://bgm.sakuraspark.fun",
+            ],
         )
 
     def test_constructor_custom_list(self):
         f = ImageFetcher(
             cache_dir=Path(tempfile.mkdtemp()),
-            api_base="https://api.example.com/",
+            api_bases=["https://api.example.com/", "https://api2.example.com"],
             mirrors=["https://img.example.com/", "https://img2.example.com"],
         )
-        self.assertEqual(f.api_base, "https://api.example.com")
+        self.assertEqual(
+            f.api_candidates(),
+            ["https://api.example.com", "https://api2.example.com", "https://api.bgm.tv"],
+        )
         self.assertEqual(
             f.mirrors, ["https://img.example.com", "https://img2.example.com"]
+        )
+
+    def test_official_always_last(self):
+        f = ImageFetcher(
+            cache_dir=Path(tempfile.mkdtemp()), api_bases=["https://api.bgm.tv"]
+        )
+        self.assertEqual(f.api_candidates(), ["https://api.bgm.tv"])
+
+    def test_legacy_single_api_base(self):
+        f = ImageFetcher(
+            cache_dir=Path(tempfile.mkdtemp()), api_base="https://legacy.example.com"
+        )
+        self.assertEqual(
+            f.api_candidates(), ["https://legacy.example.com", "https://api.bgm.tv"]
+        )
+
+    def test_api_bases_from_string(self):
+        f = ImageFetcher(
+            cache_dir=Path(tempfile.mkdtemp()),
+            api_bases="https://a.com/ ，https://b.com , ,https://a.com",
+        )
+        self.assertEqual(
+            f.api_candidates(), ["https://a.com", "https://b.com", "https://api.bgm.tv"]
         )
 
     def test_mirrors_from_string(self):

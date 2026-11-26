@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core import render  # noqa: E402
 from core.models import Heroine, Spot  # noqa: E402
-from core.theme import fortune_bar, numbered, short_link, short_path  # noqa: E402
+from core.theme import clickable, fortune_bar, numbered, short_link, short_path  # noqa: E402
 
 D = "━" * 12
 
@@ -30,13 +30,24 @@ class TestTheme(unittest.TestCase):
         self.assertEqual(numbered(20), "⑳")
         self.assertEqual(numbered(21), "21.")
 
+    def test_clickable(self):
+        self.assertEqual(clickable("zh.moegirl.org.cn/A"), "https://zh.moegirl.org.cn/A")
+        self.assertEqual(clickable("https://a.com/b"), "https://a.com/b")
+        self.assertEqual(clickable("//a.com/b"), "https://a.com/b")
+        self.assertEqual(clickable("  "), "")
+
     def test_short_link(self):
+        # 默认输出完整可点击链接
         self.assertEqual(
             short_link("https://zh.moegirl.org.cn/CLANNAD/圣地巡礼"),
+            "https://zh.moegirl.org.cn/CLANNAD/圣地巡礼",
+        )
+        self.assertEqual(short_link("zh.moegirl.org.cn/A"), "https://zh.moegirl.org.cn/A")
+        self.assertEqual(
+            short_link("https://zh.moegirl.org.cn/CLANNAD/圣地巡礼", "domain"),
             "zh.moegirl.org.cn/CLANNAD",
         )
-        self.assertEqual(short_link("https://example.com"), "example.com")
-        self.assertEqual(short_link("https://a.com/b/c", "full"), "https://a.com/b/c")
+        self.assertEqual(short_link("https://example.com", "domain"), "example.com")
         self.assertEqual(short_link("https://a.com/b", "hidden"), "")
         self.assertEqual(short_link(""), "")
 
@@ -90,7 +101,7 @@ class TestDailyCard(unittest.TestCase):
             text,
             f"🌙 今日 Gal 运势\n{D}\n👤 阿尔托莉雅 · Fate\n🌈 超大吉 ▰▰▰▰▰▰▰\n"
             f"📖 给喜欢的人发一句晚安。\n🗺️ 圣地 · 冬木市\n"
-            f"🔗 zh.moegirl.org.cn/Fate\n{D}\n🕒 2026-11-26\n💡 /换老婆 换一位",
+            f"🔗 https://zh.moegirl.org.cn/Fate\n{D}\n🕒 2026-11-26\n💡 /换老婆 换一位",
         )
 
     def test_with_spot_multiple_adds_hint(self):
@@ -138,9 +149,24 @@ class TestSpotCard(unittest.TestCase):
         self.assertEqual(
             text,
             f"🗺️ CLANNAD · 圣地巡礼\n{D}\n① 古河面包店\n"
-            f"   🔗 zh.moegirl.org.cn/CLANNAD\n② 光坂高校\n"
+            f"   🔗 https://zh.moegirl.org.cn/CLANNAD/圣地巡礼\n② 光坂高校\n"
             f"{D}\n📍 共 2 处 · 第 1/1 页",
         )
+
+    def test_region_line(self):
+        spot = Spot(work="CLANNAD", name="古河面包店", region="岐阜县")
+        text = render.spot_card("CLANNAD", [spot], 1, 1)
+        self.assertIn("   📍 岐阜县", text)
+
+    def test_link_is_clickable(self):
+        text = render.spot_card("CLANNAD", self.spots[:1], 1, 1)
+        link = [ln for ln in text.splitlines() if "🔗" in ln][0]
+        self.assertIn("https://", link)
+
+    def test_domain_style(self):
+        text = render.spot_card("CLANNAD", self.spots[:1], 1, 1, link_style="domain")
+        self.assertIn("zh.moegirl.org.cn/CLANNAD", text)
+        self.assertNotIn("https://", text)
 
     def test_multi_page_footer(self):
         text = render.spot_card("CLANNAD", self.spots[:1], 1, 3, keyword="CL")
@@ -180,6 +206,16 @@ class TestOtherCards(unittest.TestCase):
         )
         self.assertIn("👤 女主 312 位", text)
         self.assertIn("💾 astrbot_plugin_galuniverse/gal.json", text)
+
+    def test_diagnose_card_clean(self):
+        text = render.diagnose_card([("🏷️ 版本", "2.0.3")], [])
+        self.assertIn("🩺 GalUniverse 自检", text)
+        self.assertIn("🏷️ 版本 · 2.0.3", text)
+        self.assertIn("✅ 未发现遗留目录冲突", text)
+
+    def test_diagnose_card_warns(self):
+        text = render.diagnose_card([("👤 名单", "3 位")], ["发现旧插件目录 a"])
+        self.assertIn("⚠️ 发现旧插件目录 a", text)
 
     def test_not_found_with_suggestions(self):
         text = render.not_found("clannad", ["CLANNAD"])

@@ -43,13 +43,29 @@ def numbered(index: int) -> str:
     return f"{index}."
 
 
-def short_link(url: str, style: str = "domain") -> str:
-    """把长链接压缩成 域名/首段路径，省字符且仍可辨识。"""
+def clickable(url: str) -> str:
+    """补全 scheme，保证 QQ / Telegram / Discord 等客户端能识别成可点击链接。
+
+    纯文本消息里的 ``https://`` 链接会被各客户端自动转成可点击卡片；
+    而 ``zh.moegirl.org.cn/xxx`` 这种缺 scheme 的写法多数客户端不会识别。
+    """
+    url = (url or "").strip()
+    if not url:
+        return ""
+    if url.startswith("//"):
+        return "https:" + url
+    if "://" in url:
+        return url
+    return "https://" + url.lstrip("/")
+
+
+def short_link(url: str, style: str = "full") -> str:
+    """按配置输出链接：完整可点击 URL（默认）/ 域名+首段路径 / 不显示。"""
     url = (url or "").strip()
     if not url or style == "hidden":
         return ""
     if style == "full":
-        return url
+        return clickable(url)
 
     candidate = url if "://" in url else f"https://{url}"
     try:

@@ -23,8 +23,8 @@
     "options": ["auto", "bangumi", "local", "off"],
     "labels": ["自动（本地优先）", "仅 Bangumi", "仅本地图片", "关闭"],
     "subtitles": [
-      "本地有图用本地，否则查 Bangumi",
-      "始终从 Bangumi 拉取并缓存",
+      "本地有图用本地，否则查 Bangumi 镜像",
+      "始终从 Bangumi 镜像拉取并缓存",
       "只读 data/plugin_data/<插件名>/images/",
       "不发送图片"
     ]
@@ -36,16 +36,37 @@
     "slider": {"min": 1, "max": 365, "step": 1},
     "hint": "过期后重新下载，避免磁盘无限增长"
   },
-  "image_api_base": {
-    "description": "Bangumi API 地址",
+  "pool_source": {
+    "description": "角色池来源",
     "type": "string",
-    "default": "https://api.bgm.tv",
-    "hint": "角色搜索接口，可替换为自建反代；留空使用官方地址"
+    "default": "hybrid",
+    "options": ["hybrid", "bangumi", "local"],
+    "labels": ["本地名单 + 镜像抽取", "仅镜像抽取", "仅本地名单"],
+    "subtitles": [
+      "按比例混合，名单外角色从 Bangumi 镜像抽取，失败自动回落",
+      "每次都在 Bangumi 镜像里抽，断网时回落本地名单",
+      "只用 data 里的名单，不联网"
+    ],
+    "hint": "镜像抽取会按角色所属作品同步给出圣地巡礼链接"
+  },
+  "bangumi_ratio": {
+    "description": "镜像抽取占比（%）",
+    "type": "int",
+    "default": 50,
+    "slider": {"min": 0, "max": 100, "step": 10},
+    "hint": "仅 hybrid 模式生效；0 等同于只用本地名单"
+  },
+  "image_api_bases": {
+    "description": "Bangumi 接口地址（按顺序兜底）",
+    "type": "list",
+    "default": ["https://bgmapi.sakuraspark.fun", "https://api.bgm.tv"],
+    "hint": "角色搜索与立绘查询接口，镜像优先、官方最后；清空则只用官方"
   },
   "image_mirrors": {
     "description": "图片镜像站（按顺序兜底）",
     "type": "list",
     "default": [
+      "https://bgmimg.sakuraspark.fun",
       "https://bgmlain.waterbee.cc",
       "https://bgm.sakuraspark.fun"
     ],
@@ -103,10 +124,14 @@
   "link_style": {
     "description": "圣地链接展示方式",
     "type": "string",
-    "default": "domain",
-    "options": ["domain", "full", "hidden"],
-    "labels": ["仅域名+首段路径", "完整链接", "不显示"],
-    "subtitles": ["省字符，手机端更整齐", "完整 URL，可复制", "只显示地点名称"]
+    "default": "full",
+    "options": ["full", "domain", "hidden"],
+    "labels": ["完整链接（可直接点击）", "仅域名+首段路径", "不显示"],
+    "subtitles": [
+      "带 https:// 的完整 URL，聊天窗口内可直接点开",
+      "省字符，手机端更整齐但不可点击",
+      "只显示地点名称"
+    ]
   },
   "max_chars_per_message": {
     "description": "单条消息最大字数",

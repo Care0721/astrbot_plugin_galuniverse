@@ -20,6 +20,7 @@ from astrbot.api.message_components import At, Plain
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core import render
+from .core.bgm import BangumiPool
 from .core.fortune import daily_seed, pick_advice, pick_fortune, pick_index, today_key
 from .core.images import ImageFetcher
 from .core.models import Heroine, Spot
@@ -27,9 +28,22 @@ from .core.parser import chunk_text, normalize, parse_int, split_fields, split_f
 from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
-VERSION = "2.0.1"
+VERSION = "2.0.3"
 
-ADMIN_SUBS = {"添加老婆", "添加圣地", "删除老婆", "删除圣地", "重载", "统计", "导入", "备份"}
+LEGACY_PLUGIN_NAMES = ("astrbot_plugin_galuniverse",)
+"""历史版本用过的插件名。数据目录跟着插件名走，改名后需要做一次补录。"""
+
+ADMIN_SUBS = {
+    "添加老婆",
+    "添加圣地",
+    "删除老婆",
+    "删除圣地",
+    "重载",
+    "统计",
+    "导入",
+    "备份",
+    "诊断",
+}
 
 
 @register(PLUGIN_NAME, "Care", "如果在梦里能相遇的话，那大概就是现实", VERSION)
@@ -57,9 +71,14 @@ class GalUniversePlugin(Star):
             local_dir=self.data_dir / "images",
             source=str(self._cfg("image_source", "auto") or "auto"),
             cache_days=parse_int(self._cfg("image_cache_days", 30), 30),
-            api_base=str(self._cfg("image_api_base", "https://api.bgm.tv") or "https://api.bgm.tv"),
+            api_bases=self._api_bases(),
             mirrors=self._image_mirrors(),
         )
+        self.pool = BangumiPool(
+            cache_dir=self.data_dir / "image_cache",
+            api_bases=self.images.api_candidates(),
+        )
+        self.legacy_data_dirs = self._legacy_data_dirs()
         self._lock = asyncio.Lock()
         self._loaded = False
         self._image_warned: set[str] = set()
@@ -71,7 +90,7 @@ class GalUniversePlugin(Star):
 
     async def terminate(self) -> None:
         try:
-            self.state.save()
+            self.state.save(today_key(self._tz()))
         except Exception as exc:
             logger.warning(f"[GalUniverse] 保存状态失败：{exc}")
 
@@ -79,6 +98,18 @@ class GalUniversePlugin(Star):
         async with self._lock:
             report = await asyncio.to_thread(self.store.load, legacy_import)
             self._loaded = True
+            # 旧插件名遗留的数据目录：幂等补录，避免改名后「老婆变少了」
+            added_h, added_s = await asyncio.to_thread(
+                self.store.import_from_dirs, self.legacy_data_dirs
+            )
+            # 名单异常稀少时补入内置角色，避免「抽来抽去就那几个」
+            filled = await asyncio.to_thread(self.store.merge_builtin_defaults)
+        if added_h or added_s:
+            logger.info(
+                f"[GalUniverse] 已从旧数据目录补录：女主 {added_h} 位 · 圣地 {added_s} 条"
+            )
+        if filled:
+            logger.info(f"[GalUniverse] 名单过少，已补入内置角色 {filled} 位")
         logger.info(f"[GalUniverse] 数据加载完成：{report.summary()}")
         return report.summary()
 
@@ -154,15 +185,107 @@ class GalUniversePlugin(Star):
             return f"g:{event.get_platform_id()}:{gid}"
         return f"u:{event.get_platform_id()}:{self._sender_id(event)}"
 
-    def _draw(self, scope_key: str, date_key: str, reroll: int = 0) -> tuple[Heroine | None, str, str]:
-        heroines = self.store.heroines
-        if not heroines:
-            return None, "", ""
+    def _mirror_pool_enabled(self) -> bool:
+        mode = str(self._cfg("pool_source", "hybrid") or "hybrid").strip().lower()
+        if mode == "bangumi":
+            return True
+        if mode == "hybrid":
+            return parse_int(self._cfg("bangumi_ratio", 50), 50) > 0
+        return False
+
+    async def _pick_heroine(
+        self, scope_key: str, date_key: str, reroll: int = 0
+    ) -> tuple[Heroine | None, str, str, str]:
+        """抽一位老婆，返回 (角色, 签运, 建议, 立绘地址)。
+
+        抽取顺序：配置允许时先走 Bangumi 镜像角色池，失败或未命中再回落本地名单。
+        整个过程对同一个 seed 完全确定，所以同一天多次触发结果一致。
+        """
         seed = daily_seed(scope_key, date_key, reroll)
-        heroine = heroines[pick_index(seed, len(heroines))]
         fortune = pick_fortune(seed, list(self._cfg("fortune_pool", []) or []))
         advice = pick_advice(seed, list(self._cfg("advice_pool", []) or []))
-        return heroine, fortune, advice
+
+        heroine, image_url = await self._pick_from_mirror(seed)
+        if heroine is not None:
+            return heroine, fortune, advice, image_url
+
+        heroines = self.store.heroines
+        if not heroines:
+            return None, fortune, advice, ""
+        return heroines[pick_index(seed, len(heroines))], fortune, advice, ""
+
+    async def _pick_from_mirror(self, seed: str) -> tuple[Heroine | None, str]:
+        """从 Bangumi 镜像角色池抽一位；不启用或失败时返回 (None, "")。"""
+        mode = str(self._cfg("pool_source", "hybrid") or "hybrid").strip().lower()
+        if mode not in {"hybrid", "bangumi"}:
+            return None, ""
+
+        if mode == "hybrid":
+            ratio = max(0, min(100, parse_int(self._cfg("bangumi_ratio", 50), 50)))
+            if pick_index(f"{seed}|source", 100) >= ratio:
+                return None, ""
+
+        works = [name for name, _ in self.store.works()]
+        if not works:
+            return None, ""
+        # 只试一部作品：失败会写 1 小时负缓存，下一天自然换一部，避免指令被网络拖慢
+        work = works[pick_index(f"{seed}|work", len(works))]
+        try:
+            return await self.pool.draw(work, f"{seed}|{work}")
+        except Exception as exc:
+            logger.warning(f"[GalUniverse] 镜像角色池异常：{exc}")
+            return None, ""
+
+    async def _emit_image(self, event: AstrMessageEvent, heroine: Heroine, image_url: str = ""):
+        """拉取角色立绘；任何失败都静默跳过，不影响文字卡片。"""
+        if str(self._cfg("image_source", "auto")) == "off":
+            return
+        try:
+            path = await self.images.fetch(heroine.name, heroine.work, image_url=image_url)
+        except Exception as exc:
+            logger.warning(f"[GalUniverse] 立绘获取失败：{exc}")
+            return
+        if not path:
+            # 每个角色只提示一次，避免刷屏，同时方便排查网络问题
+            if heroine.name not in self._image_warned and len(self._image_warned) < 200:
+                self._image_warned.add(heroine.name)
+                bases = "、".join(self.images.api_candidates())
+                logger.info(
+                    f"[GalUniverse] 未取到「{heroine.name}」的立绘"
+                    f"（来源={self._cfg('image_source', 'auto')}，接口={bases}）"
+                )
+            return
+        try:
+            yield event.image_result(str(path))
+        except Exception as exc:
+            logger.warning(f"[GalUniverse] 立绘发送失败：{exc}")
+
+    async def _emit_daily(
+        self,
+        event: AstrMessageEvent,
+        heroine: Heroine,
+        fortune: str,
+        advice: str,
+        date_key: str,
+        reroll: int = 0,
+        image_url: str = "",
+    ):
+        spot, total = self._spot_for(heroine)
+        text = render.daily_card(
+            heroine,
+            fortune,
+            advice,
+            date_key,
+            reroll=reroll,
+            can_reroll=parse_int(self._cfg("reroll_per_day", 1), 1) > 0,
+            spot=spot,
+            spot_total=total,
+            link_style=self._link_style(),
+        )
+        async for msg in self._reply(event, text):
+            yield msg
+        async for msg in self._emit_image(event, heroine, image_url):
+            yield msg
 
     def _image_mirrors(self) -> list[str] | None:
         """镜像列表：优先读 image_mirrors，兼容旧的 image_mirror 字符串。"""
@@ -177,9 +300,43 @@ class GalUniversePlugin(Star):
             return [str(x).strip() for x in raw if str(x).strip()]
         return None
 
+    def _api_bases(self) -> list[str] | None:
+        """Bangumi 接口地址：镜像优先，官方兜底。
+
+        ``image_api_bases`` 为列表配置；旧版本只写过 ``image_api_base`` 字符串，
+        这里一并兼容，升级后不必手动改配置。
+        """
+        raw = self._cfg("image_api_bases", None)
+        if isinstance(raw, str):
+            raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
+        elif isinstance(raw, list):
+            raw = [str(x).strip() for x in raw if str(x).strip()]
+        else:
+            raw = None
+
+        legacy = str(self._cfg("image_api_base", "") or "").strip()
+        if raw:
+            return [x.rstrip("/") for x in raw if x.rstrip("/")]
+        if legacy:
+            return [legacy.rstrip("/")]
+        return None
+
+    def _legacy_data_dirs(self) -> list[Path]:
+        """旧插件名对应的数据目录，用于一次性补录。"""
+        base = self.data_dir.parent
+        out: list[Path] = []
+        for name in LEGACY_PLUGIN_NAMES:
+            candidate = base / name
+            try:
+                if candidate.is_dir() and candidate.resolve() != self.data_dir.resolve():
+                    out.append(candidate)
+            except OSError:
+                continue
+        return out
+
     def _link_style(self) -> str:
-        style = str(self._cfg("link_style", "domain") or "domain").lower()
-        return style if style in {"domain", "full", "hidden"} else "domain"
+        style = str(self._cfg("link_style", "full") or "full").lower()
+        return style if style in {"domain", "full", "hidden"} else "full"
 
     def _spot_for(self, heroine: Heroine) -> tuple[Spot | None, int]:
         """按角色所属作品找圣地，精确匹配优先，其次模糊。"""
@@ -197,55 +354,6 @@ class GalUniversePlugin(Star):
             return None, 0
         return group[0], len(group)
 
-    async def _emit_image(self, event: AstrMessageEvent, heroine: Heroine):
-        """拉取角色立绘；任何失败都静默跳过，不影响文字卡片。"""
-        if str(self._cfg("image_source", "auto")) == "off":
-            return
-        try:
-            path = await self.images.fetch(heroine.name, heroine.work)
-        except Exception as exc:
-            logger.warning(f"[GalUniverse] 立绘获取失败：{exc}")
-            return
-        if not path:
-            # 每个角色只提示一次，避免刷屏，同时方便排查网络问题
-            if heroine.name not in self._image_warned and len(self._image_warned) < 200:
-                self._image_warned.add(heroine.name)
-                logger.info(
-                    f"[GalUniverse] 未取到「{heroine.name}」的立绘"
-                    f"（来源={self._cfg('image_source', 'auto')}，可检查 api.bgm.tv 连通性）"
-                )
-            return
-        try:
-            yield event.image_result(str(path))
-        except Exception as exc:
-            logger.warning(f"[GalUniverse] 立绘发送失败：{exc}")
-
-    async def _emit_daily(
-        self,
-        event: AstrMessageEvent,
-        heroine: Heroine,
-        fortune: str,
-        advice: str,
-        date_key: str,
-        reroll: int = 0,
-    ):
-        spot, total = self._spot_for(heroine)
-        text = render.daily_card(
-            heroine,
-            fortune,
-            advice,
-            date_key,
-            reroll=reroll,
-            can_reroll=parse_int(self._cfg("reroll_per_day", 1), 1) > 0,
-            spot=spot,
-            spot_total=total,
-            link_style=self._link_style(),
-        )
-        async for msg in self._reply(event, text):
-            yield msg
-        async for msg in self._emit_image(event, heroine):
-            yield msg
-
     # ---------------- 抽老婆 ----------------
 
     @filter.command("今日老婆", alias={"今日运势", "抽老婆"})
@@ -258,20 +366,20 @@ class GalUniversePlugin(Star):
                 ):
                     yield msg
                 return
-            if not self.store.heroines:
+            if not self.store.heroines and not self._mirror_pool_enabled():
                 async for msg in self._reply(event, render.empty_heroines()):
                     yield msg
                 return
 
             date_key = today_key(self._tz())
             scope_key = self._scope_key(event)
-            heroine, fortune, advice = self._draw(scope_key, date_key)
+            heroine, fortune, advice, image_url = await self._pick_heroine(scope_key, date_key)
             if heroine is None:
                 async for msg in self._reply(event, render.empty_heroines()):
                     yield msg
                 return
             async for msg in self._emit_daily(
-                event, heroine, fortune, advice, date_key
+                event, heroine, fortune, advice, date_key, image_url=image_url
             ):
                 yield msg
         except Exception as exc:
@@ -289,7 +397,7 @@ class GalUniversePlugin(Star):
                 ):
                     yield msg
                 return
-            if not self.store.heroines:
+            if not self.store.heroines and not self._mirror_pool_enabled():
                 async for msg in self._reply(event, render.empty_heroines()):
                     yield msg
                 return
@@ -305,13 +413,15 @@ class GalUniversePlugin(Star):
                 return
 
             used = self.state.mark_reroll(state_key, date_key)
-            heroine, fortune, advice = self._draw(scope_key, date_key, used)
+            heroine, fortune, advice, image_url = await self._pick_heroine(
+                scope_key, date_key, used
+            )
             if heroine is None:
                 async for msg in self._reply(event, render.empty_heroines()):
                     yield msg
                 return
             async for msg in self._emit_daily(
-                event, heroine, fortune, advice, date_key, reroll=used
+                event, heroine, fortune, advice, date_key, reroll=used, image_url=image_url
             ):
                 yield msg
         except Exception as exc:
@@ -341,7 +451,7 @@ class GalUniversePlugin(Star):
                 return
 
             page = 1
-            tokens = body.split(" ")
+            tokens = body.split()
             if len(tokens) >= 2 and tokens[-1].isdigit():
                 page = parse_int(tokens[-1], 1)
                 work = " ".join(tokens[:-1])
@@ -553,4 +663,41 @@ class GalUniversePlugin(Star):
             ):
                 yield msg
             return
+
+        if sub == "诊断":
+            async for msg in self._reply(event, self._diagnose_card()):
+                yield msg
             return
+
+    def _diagnose_card(self) -> str:
+        """把关键运行事实摊开，专治「更新后名字对不上 / 抽来抽去就那几个」。"""
+        stats = self.store.stats()
+        warnings: list[str] = []
+
+        mode = str(self._cfg("pool_source", "hybrid") or "hybrid").strip().lower()
+        ratio = parse_int(self._cfg("bangumi_ratio", 50), 50)
+        source = f"{mode}（镜像占比 {ratio}%）"
+
+        rows = [
+            ("🧩 插件名", PLUGIN_NAME),
+            ("🏷️ 版本", VERSION),
+            ("📁 插件目录", self.plugin_dir.name),
+            ("💾 数据目录", self.data_dir.name),
+            ("👤 名单", f"{stats['heroines']} 位"),
+            ("🗺️ 圣地", f"{stats['spots']} 条 / {stats['works']} 部"),
+            ("🎲 抽签来源", source),
+            ("🌐 接口", " → ".join(self.images.api_candidates())),
+            ("🖼️ 图片镜像", f"{len(self.images.mirrors)} 个"),
+        ]
+
+        # 改名遗留：旧目录还在的话，AstrBot 会同时加载两份，指令互相抢占
+        for name in LEGACY_PLUGIN_NAMES:
+            stale = self.plugin_dir.parent / name
+            if stale.is_dir() and stale.resolve() != self.plugin_dir.resolve():
+                warnings.append(f"发现旧插件目录 {name}，请删除以免指令冲突")
+        for directory in self.legacy_data_dirs:
+            warnings.append(f"旧数据目录 {directory.name} 已补录，可手动清理")
+        if stats["heroines"] < 50:
+            warnings.append("名单少于 50 位，抽签容易重复，建议 /gal 导入 或检查数据文件")
+
+        return render.diagnose_card(rows, warnings)
