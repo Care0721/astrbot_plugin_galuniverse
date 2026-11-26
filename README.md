@@ -16,6 +16,8 @@
 | 换老婆 | 每日有限次重抽，次数可配置 |
 | 圣地巡礼 | 按作品查询取景地，同一作品支持**多条**地点，自动分页 |
 | 圣地列表 | 浏览已收录的全部作品与条目数 |
+| 圣地联动 | 抽到角色后，卡片内直接给出其作品的取景地与链接 |
+| 角色立绘 | 随卡片附带角色图片，本地优先，缺失时自动查 Bangumi |
 | 数据管理 | 聊天内增删角色/圣地，热重载无需重启 |
 | 多平台 | 纯文本输出，OneBot 群聊可选 @ 回复、长消息自动分段 |
 
@@ -81,6 +83,9 @@
 | `timezone` | string | `Asia/Shanghai` | 决定「每天」的分界点 |
 | `reroll_per_day` | int | 1 | 每日重抽次数，0 关闭 |
 | `fuzzy_match` | bool | true | 圣地模糊匹配 |
+| `enable_spot_link` | bool | true | 今日老婆附带圣地信息 |
+| `image_source` | string | `auto` | 立绘来源：`auto` / `bangumi` / `local` / `off` |
+| `image_cache_days` | int | 30 | 立绘缓存天数 |
 | `page_size` | int | 6 | 每页条数 |
 | `link_style` | string | `domain` | 链接展示：`domain` / `full` / `hidden` |
 | `max_chars_per_message` | int | 1000 | 单条消息上限，超出自动分段 |
@@ -100,10 +105,15 @@
 👤 古河渚 · CLANNAD
 ✨ 大吉 ▰▰▰▰▰▰▱
 📖 今天适合重温一段旧剧情，别忘了存档。
+🗺️ 圣地 · 东京都瑞穗町长冈(古河面包店)
+🔗 zh.moegirl.org.cn/CLANNAD
 ━━━━━━━━━━━━
 🕒 2026-11-26 · 第 2 抽
 💡 /换老婆 换一位
+💡 /圣地巡礼 CLANNAD 共 2 处
 ```
+
+随后会再发一张该角色的立绘（图片发送失败时静默跳过，不影响文字卡片）。
 
 ```
 🗺️ CLANNAD · 圣地巡礼
@@ -120,6 +130,19 @@
 
 ---
 
+## 角色立绘
+
+发送顺序：文字卡片 → 立绘图片。
+
+优先级：
+
+1. **本地图片**：`data/plugin_data/astrbot_plugin_universe/images/`
+   文件名支持 `古河渚.jpg`、`古河渚 (CLANNAD).png`，扩展名 `.jpg/.jpeg/.png/.webp/.gif`
+2. **Bangumi**：按角色名搜索 `api.bgm.tv`，取 `large/medium` 立绘并缓存到 `image_cache/`
+3. 都拿不到：只发文字卡片，不报错
+
+`image_source` 可强制指定来源，或设 `off` 完全关闭。搜索失败会写 miss 标记，24 小时内不再重试，避免拖慢抽签。
+
 ## OneBot 适配说明
 
 1. **权限**：OneBot 私聊事件的 `role` 恒为 `member`，`is_admin()` 判定不到。
@@ -135,8 +158,10 @@
 
 ```
 data/plugin_data/astrbot_plugin_universe/
-├── gal.json     # 角色与圣地数据（原子写入）
-└── state.json   # 每日重抽计数（按天自动清理）
+├── gal.json        # 角色与圣地数据（原子写入）
+├── state.json      # 每日重抽计数（按天自动清理）
+├── images/         # 自定义立绘，优先级最高
+└── image_cache/    # 从 Bangumi 下载的缓存，按天数过期
 ```
 
 **不再写入插件目录**，插件升级/重装不会丢数据。备份直接拷 `gal.json` 即可。

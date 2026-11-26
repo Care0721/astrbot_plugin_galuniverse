@@ -10,6 +10,32 @@
     "type": "bool",
     "default": true
   },
+  "enable_spot_link": {
+    "description": "今日老婆附带圣地信息",
+    "type": "bool",
+    "default": true,
+    "hint": "按角色所属作品自动匹配取景地，随运势卡片一起发出"
+  },
+  "image_source": {
+    "description": "角色立绘来源",
+    "type": "string",
+    "default": "auto",
+    "options": ["auto", "bangumi", "local", "off"],
+    "labels": ["自动（本地优先）", "仅 Bangumi", "仅本地图片", "关闭"],
+    "subtitles": [
+      "本地有图用本地，否则查 Bangumi",
+      "始终从 Bangumi 拉取并缓存",
+      "只读 data/plugin_data/<插件名>/images/",
+      "不发送图片"
+    ]
+  },
+  "image_cache_days": {
+    "description": "立绘缓存天数",
+    "type": "int",
+    "default": 30,
+    "slider": {"min": 1, "max": 365, "step": 1},
+    "hint": "过期后重新下载，避免磁盘无限增长"
+  },
   "fortune_scope": {
     "description": "抽签范围",
     "type": "string",

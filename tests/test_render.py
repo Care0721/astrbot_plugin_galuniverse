@@ -76,6 +76,55 @@ class TestDailyCard(unittest.TestCase):
         text = render.daily_card(Heroine(name="无名"), "中吉", "建议", "2026-11-26")
         self.assertIn("👤 无名\n", text)
 
+    def test_with_spot_single(self):
+        spot = Spot(work="Fate", name="冬木市", link="https://zh.moegirl.org.cn/Fate")
+        text = render.daily_card(
+            Heroine(name="阿尔托莉雅", work="Fate"),
+            "超大吉",
+            "给喜欢的人发一句晚安。",
+            "2026-11-26",
+            spot=spot,
+            spot_total=1,
+        )
+        self.assertEqual(
+            text,
+            f"🌙 今日 Gal 运势\n{D}\n👤 阿尔托莉雅 · Fate\n🌈 超大吉 ▰▰▰▰▰▰▰\n"
+            f"📖 给喜欢的人发一句晚安。\n🗺️ 圣地 · 冬木市\n"
+            f"🔗 zh.moegirl.org.cn/Fate\n{D}\n🕒 2026-11-26\n💡 /换老婆 换一位",
+        )
+
+    def test_with_spot_multiple_adds_hint(self):
+        spot = Spot(work="Fate", name="冬木市", link="https://zh.moegirl.org.cn/Fate")
+        text = render.daily_card(
+            Heroine(name="阿尔托莉雅", work="Fate"),
+            "大吉",
+            "建议",
+            "2026-11-26",
+            spot=spot,
+            spot_total=3,
+        )
+        self.assertIn("💡 /圣地巡礼 Fate 共 3 处", text)
+
+    def test_spot_without_link(self):
+        spot = Spot(work="Fate", name="冬木市", link="")
+        text = render.daily_card(
+            Heroine(name="阿尔托莉雅", work="Fate"), "大吉", "建议", "2026-11-26", spot=spot
+        )
+        self.assertIn("🗺️ 圣地 · 冬木市", text)
+        self.assertNotIn("🔗", text)
+
+    def test_spot_hidden_link_style(self):
+        spot = Spot(work="Fate", name="冬木市", link="https://zh.moegirl.org.cn/Fate")
+        text = render.daily_card(
+            Heroine(name="阿尔托莉雅", work="Fate"),
+            "大吉",
+            "建议",
+            "2026-11-26",
+            spot=spot,
+            link_style="hidden",
+        )
+        self.assertNotIn("🔗", text)
+
 
 class TestSpotCard(unittest.TestCase):
     def setUp(self):

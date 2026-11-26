@@ -48,7 +48,7 @@ class LoadReport:
         return "，".join(bits)
 
 
-def _norm(text: str) -> str:
+def norm(text: str) -> str:
     return "".join(str(text).split()).upper()
 
 
@@ -287,12 +287,12 @@ class GalStore:
     # ---------------- 查询 ----------------
 
     def find_spots(self, query: str, fuzzy: bool = True, limit: int = 5) -> list[Spot]:
-        q = _norm(query)
+        q = norm(query)
         if not q:
             return []
         scored: list[tuple[int, Spot]] = []
         for spot in self.spots:
-            work, name, region = _norm(spot.work), _norm(spot.name), _norm(spot.region)
+            work, name, region = norm(spot.work), norm(spot.name), norm(spot.region)
             if work == q:
                 score = 100
             elif fuzzy and work.startswith(q):

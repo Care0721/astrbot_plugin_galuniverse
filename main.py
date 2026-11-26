@@ -21,9 +21,10 @@ from astrbot.api.star import Context, Star, StarTools, register
 
 from .core import render
 from .core.fortune import daily_seed, pick_advice, pick_fortune, pick_index, today_key
-from .core.models import Heroine
+from .core.images import ImageFetcher
+from .core.models import Heroine, Spot
 from .core.parser import chunk_text, normalize, parse_int, split_fields, split_first, strip_command
-from .core.store import GalStore, StateStore
+from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
 VERSION = "2.0.0"
@@ -51,6 +52,12 @@ class GalUniversePlugin(Star):
             legacy_dirs=(self.plugin_dir, self.data_dir),
         )
         self.state = StateStore(self.data_dir)
+        self.images = ImageFetcher(
+            cache_dir=self.data_dir / "image_cache",
+            local_dir=self.data_dir / "images",
+            source=str(self._cfg("image_source", "auto") or "auto"),
+            cache_days=parse_int(self._cfg("image_cache_days", 30), 30),
+        )
         self._lock = asyncio.Lock()
         self._loaded = False
 
@@ -158,6 +165,64 @@ class GalUniversePlugin(Star):
         style = str(self._cfg("link_style", "domain") or "domain").lower()
         return style if style in {"domain", "full", "hidden"} else "domain"
 
+    def _spot_for(self, heroine: Heroine) -> tuple[Spot | None, int]:
+        """按角色所属作品找圣地，精确匹配优先，其次模糊。"""
+        if not bool(self._cfg("enable_spot_link", True)) or not heroine.work:
+            return None, 0
+        target = norm(heroine.work)
+        group = [s for s in self.store.spots if norm(s.work) == target]
+        if not group:
+            matches = self.store.find_spots(heroine.work, fuzzy=True, limit=1)
+            if not matches:
+                return None, 0
+            work = matches[0].work
+            group = [s for s in self.store.spots if s.work == work]
+        if not group:
+            return None, 0
+        return group[0], len(group)
+
+    async def _emit_image(self, event: AstrMessageEvent, heroine: Heroine):
+        """拉取角色立绘；任何失败都静默跳过，不影响文字卡片。"""
+        if str(self._cfg("image_source", "auto")) == "off":
+            return
+        try:
+            path = await self.images.fetch(heroine.name, heroine.work)
+        except Exception as exc:
+            logger.warning(f"[GalUniverse] 立绘获取失败：{exc}")
+            return
+        if not path:
+            return
+        try:
+            yield event.image_result(str(path))
+        except Exception as exc:
+            logger.warning(f"[GalUniverse] 立绘发送失败：{exc}")
+
+    async def _emit_daily(
+        self,
+        event: AstrMessageEvent,
+        heroine: Heroine,
+        fortune: str,
+        advice: str,
+        date_key: str,
+        reroll: int = 0,
+    ):
+        spot, total = self._spot_for(heroine)
+        text = render.daily_card(
+            heroine,
+            fortune,
+            advice,
+            date_key,
+            reroll=reroll,
+            can_reroll=parse_int(self._cfg("reroll_per_day", 1), 1) > 0,
+            spot=spot,
+            spot_total=total,
+            link_style=self._link_style(),
+        )
+        async for msg in self._reply(event, text):
+            yield msg
+        async for msg in self._emit_image(event, heroine):
+            yield msg
+
     # ---------------- 抽老婆 ----------------
 
     @filter.command("今日老婆", alias={"今日运势", "抽老婆"})
@@ -182,15 +247,8 @@ class GalUniversePlugin(Star):
                 async for msg in self._reply(event, render.empty_heroines()):
                     yield msg
                 return
-            async for msg in self._reply(
-                event,
-                render.daily_card(
-                    heroine,
-                    fortune,
-                    advice,
-                    date_key,
-                    can_reroll=parse_int(self._cfg("reroll_per_day", 1), 1) > 0,
-                ),
+            async for msg in self._emit_daily(
+                event, heroine, fortune, advice, date_key
             ):
                 yield msg
         except Exception as exc:
@@ -229,8 +287,8 @@ class GalUniversePlugin(Star):
                 async for msg in self._reply(event, render.empty_heroines()):
                     yield msg
                 return
-            async for msg in self._reply(
-                event, render.daily_card(heroine, fortune, advice, date_key, reroll=used)
+            async for msg in self._emit_daily(
+                event, heroine, fortune, advice, date_key, reroll=used
             ):
                 yield msg
         except Exception as exc:

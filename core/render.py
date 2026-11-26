@@ -38,6 +38,9 @@ def daily_card(
     date_key: str,
     reroll: int = 0,
     can_reroll: bool = True,
+    spot: Spot | None = None,
+    spot_total: int = 0,
+    link_style: str = "domain",
 ) -> str:
     emoji, _ = fortune_style(fortune)
     body = [
@@ -45,8 +48,20 @@ def daily_card(
         f"{emoji} {fortune} {fortune_bar(fortune)}",
         f"📖 {advice}",
     ]
+    if spot is not None:
+        body.append(f"🗺️ 圣地 · {spot.name}")
+        link = short_link(spot.link, link_style)
+        if link:
+            body.append(f"🔗 {link}")
+
     tail = f"🕒 {date_key}" + (f" · 第 {reroll + 1} 抽" if reroll else "")
-    footer = [tail, "💡 /换老婆 换一位" if can_reroll else "💡 明天再来抽一次"]
+    footer = [tail]
+    if can_reroll:
+        footer.append("💡 /换老婆 换一位")
+    else:
+        footer.append("💡 明天再来抽一次")
+    if spot is not None and spot_total > 1:
+        footer.append(f"💡 /圣地巡礼 {spot.work} 共 {spot_total} 处")
     return card("🌙 今日 Gal 运势", body, footer)
 
 
