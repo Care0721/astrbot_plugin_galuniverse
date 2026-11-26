@@ -198,7 +198,7 @@ class BangumiPool:
             return []
 
         headers = {
-            "User-Agent": "CareGalUniverse/2.0.8 (+https://github.com/Care0721/astrbot_plugin_galuniverse)",
+            "User-Agent": "CareGalUniverse/2.0.9 (+https://github.com/Care0721/astrbot_plugin_galuniverse)",
             "Content-Type": "application/json",
         }
         timeout = aiohttp.ClientTimeout(total=self.timeout)

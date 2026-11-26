@@ -33,7 +33,7 @@ BGM_IMAGE_MIRRORS = (
 )
 """图片镜像：按顺序尝试，全部失败后回源官方。"""
 
-USER_AGENT = "CareGalUniverse/2.0.8 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
+USER_AGENT = "CareGalUniverse/2.0.9 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_BYTES = 8 * 1024 * 1024
 MISS_TTL = 1800
@@ -57,6 +57,35 @@ def to_mirror(url: str, mirror: str) -> str:
     return f"{mirror}{parsed.path}{suffix}"
 
 
+def upscale_image(
+    data: bytes, min_width: int = 720, max_scale: float = 2.5
+) -> tuple[bytes, str]:
+    """把过小的立绘放大到 ``min_width``，否则 QQ 里会显示成一张小缩略图。
+
+    没装 Pillow、图片本来就够大、或处理失败时，原样返回（第二个值为空串）。
+    """
+    try:
+        from io import BytesIO
+
+        from PIL import Image as PILImage
+    except Exception:
+        return data, ""
+    try:
+        with PILImage.open(BytesIO(data)) as im:
+            width, height = im.size
+            if width <= 0 or height <= 0 or width >= min_width:
+                return data, ""
+            scale = min(max_scale, min_width / width)
+            resized = im.convert("RGB").resize(
+                (int(width * scale), int(height * scale)), PILImage.LANCZOS
+            )
+            buf = BytesIO()
+            resized.save(buf, format="JPEG", quality=88)
+            return buf.getvalue(), ".jpg"
+    except Exception:
+        return data, ""
+
+
 class ImageFetcher:
     def __init__(
         self,
@@ -68,6 +97,7 @@ class ImageFetcher:
         api_bases: list[str] | str | None = None,
         api_base: str | None = None,
         mirrors: list[str] | str | None = None,
+        upscale: bool = True,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.local_dir = Path(local_dir) if local_dir else None
@@ -76,6 +106,7 @@ class ImageFetcher:
         self.mirrors = self._normalize_mirrors(mirrors)
         self.cache_seconds = max(1, int(cache_days)) * 86400
         self.timeout = max(1.0, float(timeout))
+        self.upscale = bool(upscale)
         self.url_cache_path = self.cache_dir / "image_urls.json"
         self._urls: dict[str, str] = {}
         self._load_urls()
@@ -398,9 +429,13 @@ class ImageFetcher:
             content = await self._read_image(session, candidate)
             if content is None:
                 continue
-            ext = self._guess_ext(content[1])
+            data, content_type = content
+            forced_ext = ""
+            if self.upscale:
+                data, forced_ext = upscale_image(data)
+            ext = forced_ext or self._guess_ext(content_type)
             path = self._write_atomic(
-                self.cache_dir / f"{self._cache_prefix(name)}{ext}", content[0]
+                self.cache_dir / f"{self._cache_prefix(name)}{ext}", data
             )
             if path:
                 return path

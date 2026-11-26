@@ -4,7 +4,7 @@
 
 支持 **OneBot v11（aiocqhttp / NapCat / Lagrange）**、QQ 官方机器人、Telegram、Discord、飞书等 AstrBot 已接入的平台。指令输出为纯文本，不依赖 Markdown 渲染。
 
-当前版本：**v2.0.8**
+当前版本：**v2.0.9**
 
 ---
 
@@ -97,6 +97,7 @@
 | `enable_spot_link` | bool | true | 今日老婆附带圣地信息 |
 | `image_source` | string | `auto` | 立绘来源：`auto` / `bangumi` / `local` / `off` |
 | `image_cache_days` | int | 30 | 立绘缓存天数 |
+| `image_upscale` | bool | true | 原图窄于 720px 时放大后再发，避免显示成缩略图 |
 | `render_mode` | string | `auto` | 消息格式：`auto`（图片走附件，必定显示）/ `markdown` / `text` |
 | `single_message` | bool | true | 图文合成一条消息，立绘插在名字下面 |
 | `pool_source` | string | `hybrid` | 角色池：`hybrid`（本地+镜像）/ `bangumi`（仅镜像）/ `local`（仅本地） |
@@ -311,7 +312,7 @@ core/parser.py        # 参数解析、长消息分段
 core/render.py        # 纯文本渲染
 core/theme.py         # 视觉常量（分隔线、签运、链接）
 assets/               # 内置初始数据
-tests/                # 单测（122 项）
+tests/                # 单测（127 项）
 ```
 
 ---

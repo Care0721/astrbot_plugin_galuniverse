@@ -191,14 +191,16 @@ class TestDailyParts(unittest.TestCase):
         head, tail = render.daily_parts(
             Heroine(name="古河渚", work="CLANNAD"), "大吉", "记得存档。", "2026-11-26"
         )
-        self.assertEqual(head, f"🌙 今日老婆\n{D}\n【古河渚 · CLANNAD】")
+        self.assertEqual(head, f"🌙 今日老婆\n{D}\n【古河渚 · CLANNAD】\n")
         self.assertTrue(tail.startswith("✨ 大吉"))
         self.assertIn(D, tail)
 
     def test_parts_rejoin_to_card(self):
         args = (Heroine(name="古河渚", work="CLANNAD"), "大吉", "记得存档。", "2026-11-26")
         head, tail = render.daily_parts(*args)
-        self.assertEqual(f"{head}\n{tail}", render.daily_card(*args))
+        self.assertEqual(head + tail, render.daily_card(*args))
+        # 消息链里两段 Plain 直接拼接，head 必须自带换行，否则名字会和运势挤在一行
+        self.assertTrue(head.endswith("\n"))
 
 
 class TestSpotCard(unittest.TestCase):

@@ -36,6 +36,12 @@
     "slider": {"min": 1, "max": 365, "step": 1},
     "hint": "过期后重新下载，避免磁盘无限增长"
   },
+  "image_upscale": {
+    "description": "小图自动放大",
+    "type": "bool",
+    "default": true,
+    "hint": "原图窄于 720px 时放大后再发，避免在聊天里显示成小缩略图（需要 Pillow，缺失则自动跳过）"
+  },
   "pool_source": {
     "description": "角色池来源",
     "type": "string",

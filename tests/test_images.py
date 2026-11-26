@@ -336,5 +336,76 @@ class TestMissMarker(ImageTestBase):
         self.assertEqual(calls, ["https://img.example.com/a.jpg"])
 
 
+try:
+    import PIL  # noqa: F401
+
+    HAS_PIL = True
+except ImportError:  # pragma: no cover
+    HAS_PIL = False
+
+
+@unittest.skipUnless(HAS_PIL, "需要 Pillow")
+class TestUpscale(unittest.TestCase):
+    def _png(self, w: int, h: int) -> bytes:
+        from io import BytesIO
+
+        from PIL import Image as PILImage
+
+        buf = BytesIO()
+        PILImage.new("RGB", (w, h), (200, 100, 50)).save(buf, format="PNG")
+        return buf.getvalue()
+
+    def test_small_image_upscaled(self):
+        from io import BytesIO
+
+        from PIL import Image as PILImage
+
+        from core.images import upscale_image
+
+        data, ext = upscale_image(self._png(200, 300))
+        self.assertEqual(ext, ".jpg")
+        with PILImage.open(BytesIO(data)) as im:
+            # 200px 起放大，受 max_scale=2.5 限制 → 500px
+            self.assertGreaterEqual(im.size[0], 480)
+            self.assertLess(im.size[0], 720)
+
+    def test_reaches_target_when_source_big_enough(self):
+        from io import BytesIO
+
+        from PIL import Image as PILImage
+
+        from core.images import upscale_image
+
+        data, _ = upscale_image(self._png(400, 600))
+        with PILImage.open(BytesIO(data)) as im:
+            self.assertEqual(im.size[0], 720)
+
+    def test_large_image_untouched(self):
+        from core.images import upscale_image
+
+        raw = self._png(900, 1200)
+        data, ext = upscale_image(raw)
+        self.assertEqual(data, raw)
+        self.assertEqual(ext, "")
+
+    def test_scale_capped(self):
+        from io import BytesIO
+
+        from PIL import Image as PILImage
+
+        from core.images import upscale_image
+
+        data, _ = upscale_image(self._png(100, 100), min_width=720, max_scale=2.5)
+        with PILImage.open(BytesIO(data)) as im:
+            self.assertLessEqual(im.size[0], 260)
+
+    def test_garbage_bytes_survive(self):
+        from core.images import upscale_image
+
+        data, ext = upscale_image(b"not an image")
+        self.assertEqual(data, b"not an image")
+        self.assertEqual(ext, "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

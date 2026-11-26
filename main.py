@@ -19,6 +19,11 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import At, Image, Plain
 from astrbot.api.star import Context, Star, StarTools, register
 
+try:  # 老内核没有 Unknown，缺失时退化为「不处理」
+    from astrbot.api.message_components import Unknown
+except ImportError:  # pragma: no cover
+    Unknown = None  # type: ignore[assignment]
+
 from .core import render
 from .core.bgm import BangumiPool
 from .core.fortune import daily_seed, pick_advice, pick_fortune, pick_index, today_key
@@ -28,7 +33,7 @@ from .core.parser import chunk_text, normalize, parse_int, split_fields, split_f
 from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
-VERSION = "2.0.8"
+VERSION = "2.0.9"
 
 MARKDOWN_PLATFORMS = {"qq_official", "qq_official_webhook"}
 """原生支持 Markdown 的平台。QQ 官方机器人群聊/单聊已全量开放。"""
@@ -86,6 +91,7 @@ class GalUniversePlugin(Star):
             cache_days=parse_int(self._cfg("image_cache_days", 30), 30),
             api_bases=self._api_bases(),
             mirrors=self._image_mirrors(),
+            upscale=bool(self._cfg("image_upscale", True)),
         )
         self.pool = BangumiPool(
             cache_dir=self.data_dir / "image_cache",
@@ -472,6 +478,27 @@ class GalUniversePlugin(Star):
         if not group:
             return None, 0
         return group[0], len(group)
+
+    @filter.on_decorating_result()
+    async def _hide_qq_at_tag(self, event: AstrMessageEvent):
+        """QQ 官方富媒体消息会把 At 组件序列化成 ``<qqbot-at-user id="…"/>`` 文本。
+
+        AstrBot 的「回复时 @ 用户」只对「纯文本/图文」消息生效，
+        这里塞一个平台会忽略的占位组件，让它跳过 @ 装饰 —— 否则那串 XML 会直接漏在正文里。
+        """
+        if Unknown is None or self._platform(event) not in MARKDOWN_PLATFORMS:
+            return
+        try:
+            result = event.get_result()
+        except Exception:
+            return
+        if result is None or not result.chain:
+            return
+        if not any(isinstance(c, Image) for c in result.chain):
+            return
+        if any(isinstance(c, Unknown) for c in result.chain):
+            return
+        result.chain.append(Unknown(text=""))
 
     # ---------------- 抽老婆 ----------------
 

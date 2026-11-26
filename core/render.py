@@ -99,7 +99,7 @@ def daily_parts(
 
     OneBot 这类支持图文混排的平台用它实现「图片插在名字下面、只发一条消息」。
     """
-    head = "\n".join([DAILY_TITLE, DIVIDER, _daily_name(heroine)])
+    head = "\n".join([DAILY_TITLE, DIVIDER, _daily_name(heroine)]) + "\n"
     tail = "\n".join(
         _daily_body_lines(fortune, advice, spot, link_style)
         + [DIVIDER]
@@ -130,7 +130,7 @@ def daily_card(
         spot_total=spot_total,
         link_style=link_style,
     )
-    return f"{head}\n{tail}"
+    return head + tail
 
 
 def daily_markdown(
