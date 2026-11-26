@@ -4,7 +4,7 @@
 
 支持 **OneBot v11（aiocqhttp / NapCat / Lagrange）**、QQ 官方机器人、Telegram、Discord、飞书等 AstrBot 已接入的平台。指令输出为纯文本，不依赖 Markdown 渲染。
 
-当前版本：**v2.1.0**
+当前版本：**v2.1.1**
 
 ---
 

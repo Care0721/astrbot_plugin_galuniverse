@@ -33,7 +33,7 @@ from .core.parser import chunk_text, normalize, parse_int, split_fields, split_f
 from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 
 MARKDOWN_PLATFORMS = {"qq_official", "qq_official_webhook"}
 """原生支持 Markdown 的平台。QQ 官方机器人群聊/单聊已全量开放。"""
@@ -345,11 +345,21 @@ class GalUniversePlugin(Star):
         return got if got else (None, "")
 
     async def _image_path(self, heroine: Heroine, image_url: str = "") -> Path | None:
-        """拉取角色立绘到本地；任何失败都返回 None，不影响文字卡片。"""
+        """拉取角色立绘到本地；任何失败都返回 None，不影响文字卡片。
+
+        取图顺序：镜像池直给地址 → **在角色所属作品里找同名角色** → 全局同名搜索。
+        先按作品限定范围，能避免「同名不同人」把图配错。
+        """
         if not self._images_enabled():
             return None
+        url = image_url
+        if not url and heroine.work:
+            try:
+                url = await self.pool.find_image(heroine.work, heroine.name)
+            except Exception:
+                url = ""
         try:
-            return await self.images.fetch(heroine.name, heroine.work, image_url=image_url)
+            return await self.images.fetch(heroine.name, heroine.work, image_url=url)
         except Exception as exc:
             self.images.last_reason = f"异常：{exc}"
             return None

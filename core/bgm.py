@@ -26,6 +26,7 @@ from typing import Any
 
 from .fortune import pick_index
 from .models import Heroine
+from .store import name_key as _name_key
 from .store import norm as _norm
 
 POOL_FILE = "bgm_pool.json"
@@ -40,6 +41,13 @@ MAX_ITEMS = 40
 
 MIN_POOL = 6
 """作品可用角色少于这个数就不用它抽 —— 否则每次都抽到同一两个人。"""
+
+
+def _has_kana(text: str) -> bool:
+    """是否包含平假名/片假名（用来判断「名字是日文音译」而不是另一个汉字名）。"""
+    return any(
+        "\u3040" <= ch <= "\u30ff" or "\uff66" <= ch <= "\uff9f" for ch in text
+    )
 
 
 def _digest(text: str) -> str:
@@ -158,6 +166,45 @@ class BangumiPool:
         for old in list(picks)[: len(picks) - 2000]:
             picks.pop(old, None)
 
+    # ---------------- 按作品找立绘 ----------------
+
+    async def find_image(self, work: str, name: str) -> str:
+        """在**指定作品**的角色表里找这个人，返回立绘地址；找不到返回 ""。
+
+        先精确同名，再退化到「唯一前缀匹配」（冬马和纱 → 冬馬かずさ）。
+        因为范围限定在同一部作品里，前缀匹配基本不会认错人；
+        全局搜索才容易把「水无月椰子」配成「水無月妙子」。
+        """
+        if not work or not name:
+            return ""
+        try:
+            items = await self._characters(work)
+        except Exception:
+            return ""
+        if not items:
+            return ""
+
+        target = _name_key(name)
+        for item in items:
+            if _name_key(str(item.get("name") or "")) == target:
+                return str(item.get("image") or "")
+
+        if len(target) >= 2:
+            head = target[:2]
+            hits = [
+                item
+                for item in items
+                if _name_key(str(item.get("name") or "")).startswith(head)
+            ]
+            # 只认「姓氏相同 + 名字是假名」这一种情况：
+            # 冬马和纱 → 冬馬かずさ（かずさ 是假名，中译名本来就对不上）
+            # 而 水无月椰子 → 水無月妙子 名字都是汉字，属于不同的人，绝不能认
+            if len(hits) == 1:
+                rest = _name_key(str(hits[0].get("name") or ""))[len(head) :]
+                if _has_kana(rest):
+                    return str(hits[0].get("image") or "")
+        return ""
+
     # ---------------- 接口 ----------------
 
     async def _characters(self, work: str) -> list[dict[str, str]]:
@@ -202,7 +249,7 @@ class BangumiPool:
             return []
 
         headers = {
-            "User-Agent": "CareGalUniverse/2.1.0 (+https://github.com/Care0721/astrbot_plugin_galuniverse)",
+            "User-Agent": "CareGalUniverse/2.1.1 (+https://github.com/Care0721/astrbot_plugin_galuniverse)",
             "Content-Type": "application/json",
         }
         timeout = aiohttp.ClientTimeout(total=self.timeout)

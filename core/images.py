@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .store import norm
+from .store import name_key, norm
 
 BGM_API_BASE = "https://api.bgm.tv"
 """Bangumi 官方 API，始终作为最后一层兜底。"""
@@ -33,10 +33,13 @@ BGM_IMAGE_MIRRORS = (
 )
 """图片镜像：按顺序尝试，全部失败后回源官方。"""
 
-USER_AGENT = "CareGalUniverse/2.1.0 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
+USER_AGENT = "CareGalUniverse/2.1.1 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_BYTES = 8 * 1024 * 1024
 MISS_TTL = 1800
+
+CACHE_VERSION = 2
+"""缓存命名版本；匹配策略变化时 +1，让旧的（可能配错人的）图片失效。"""
 
 
 def to_mirror(url: str, mirror: str) -> str:
@@ -323,7 +326,8 @@ class ImageFetcher:
     # ---------------- 缓存 ----------------
 
     def _cache_prefix(self, name: str) -> str:
-        return hashlib.sha1(norm(name).encode("utf-8")).hexdigest()
+        # 带版本号：改名/换匹配策略后旧缓存自动失效，避免继续用配错人的图
+        return hashlib.sha1(f"v{CACHE_VERSION}|{norm(name)}".encode("utf-8")).hexdigest()
 
     def _find_cached(self, name: str) -> Path | None:
         prefix = self._cache_prefix(name)
@@ -375,7 +379,11 @@ class ImageFetcher:
         return None
 
     async def _search_image_urls(self, session, base: str, name: str) -> list[str]:
-        """按角色名搜索，返回**多个尺寸**的图片地址（大的优先，小的兜底）。"""
+        """按角色名搜索，返回**多个尺寸**的图片地址（大的优先，小的兜底）。
+
+        只接受**同名**的角色。找不到就返回空 —— 绝不能拿搜索结果的第一个人凑数，
+        否则「水无月椰子」会被配上「水無月妙子」的图。
+        """
         payload = {"keyword": name, "filter": {"nsfw": False}}
         try:
             async with session.post(
@@ -394,13 +402,17 @@ class ImageFetcher:
             self.last_reason = f"搜索接口 {base} 无结果"
             return []
 
-        target = norm(name)
+        target = name_key(name)
         chosen = next(
-            (it for it in items if isinstance(it, dict) and norm(it.get("name", "")) == target),
-            items[0] if isinstance(items[0], dict) else None,
+            (
+                it
+                for it in items
+                if isinstance(it, dict) and name_key(it.get("name", "")) == target
+            ),
+            None,
         )
-        if not chosen:
-            self.last_reason = "搜索结果里没有可用条目"
+        if chosen is None:
+            self.last_reason = "没有同名角色（拒绝用近似结果凑数）"
             return []
         images = chosen.get("images") or {}
         urls: list[str] = []
