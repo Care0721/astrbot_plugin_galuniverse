@@ -1,10 +1,9 @@
-"""角色立绘获取：本地优先，其次 Bangumi，失败静默降级。
+"""Character art. Local files first, then Bangumi, and give up quietly.
 
-设计原则：
-- 任何网络异常都不能影响「今日老婆」正常出卡；
-- 本地 ``data/plugin_data/<plugin>/images/`` 可放同名图片覆盖在线源；
-- 下载结果落盘缓存，命中缓存不发请求；
-- 搜索失败写 miss 标记，一天内不再重试，避免拖慢每次抽签。
+A network error must never break the daily draw: everything here returns
+None on failure and the caller just posts the card without a picture.
+Images are cached on disk; a failed lookup leaves a miss marker so we do
+not hit the API again for every draw.
 """
 
 from __future__ import annotations
@@ -21,17 +20,17 @@ from urllib.parse import urlparse
 from .store import name_key, norm
 
 BGM_API_BASE = "https://api.bgm.tv"
-"""Bangumi 官方 API，始终作为最后一层兜底。"""
+"""Official API, always the last fallback."""
 
 BGM_API_MIRRORS = ("https://bgmapi.sakuraspark.fun",)
-"""Bangumi API 反代。官方域名在部分网络环境下不可达，优先走镜像。"""
+"""API mirrors. The official domain is often unreachable, so try these first."""
 
 BGM_IMAGE_MIRRORS = (
     "https://bgmimg.sakuraspark.fun",
     "https://bgmlain.waterbee.cc",
     "https://bgm.sakuraspark.fun",
 )
-"""图片镜像：按顺序尝试，全部失败后回源官方。"""
+"""Image mirrors, tried in order, official host last."""
 
 USER_AGENT = "CareGalUniverse/2.1.1 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -39,15 +38,15 @@ MAX_BYTES = 8 * 1024 * 1024
 MISS_TTL = 1800
 
 CACHE_VERSION = 2
-"""缓存命名版本；匹配策略变化时 +1，让旧的（可能配错人的）图片失效。"""
+"""Part of the cache filename. Bump it when the matching rules change."""
 
 
 def to_mirror(url: str, mirror: str) -> str:
-    """把 lain.bgm.tv 的图片地址改写到镜像站，保留 path 与 query。
+    """Point an image url at a mirror, keeping path and query.
 
-    镜像站按原路径反代 ``lain.bgm.tv``，所以只替换 host：
-    ``https://lain.bgm.tv/pic/crt/l/00/01/1_crt.jpg?r=1``
-    → ``https://bgmlain.waterbee.cc/pic/crt/l/00/01/1_crt.jpg?r=1``
+    The mirrors proxy lain.bgm.tv by path, so only the host changes:
+      https://lain.bgm.tv/pic/crt/l/00/01/1_crt.jpg?r=1
+      -> https://bgmlain.waterbee.cc/pic/crt/l/00/01/1_crt.jpg?r=1
     """
     url = (url or "").strip()
     mirror = (mirror or "").strip().rstrip("/")
@@ -63,9 +62,10 @@ def to_mirror(url: str, mirror: str) -> str:
 def upscale_image(
     data: bytes, min_width: int = 720, max_scale: float = 2.5
 ) -> tuple[bytes, str]:
-    """把过小的立绘放大到 ``min_width``，否则 QQ 里会显示成一张小缩略图。
+    """Upscale narrow art, otherwise QQ renders it as a tiny thumbnail.
 
-    没装 Pillow、图片本来就够大、或处理失败时，原样返回（第二个值为空串）。
+    Returns the input unchanged (with an empty extension) when Pillow is
+    missing, the image is already wide enough, or anything goes wrong.
     """
     try:
         from io import BytesIO
@@ -115,15 +115,16 @@ class ImageFetcher:
         self._load_urls()
         self._locks: dict[str, asyncio.Lock] = {}
         self.last_reason = ""
-        """最近一次失败的原因，供上层打日志排查用。"""
+        """Why the last fetch failed. The caller logs it."""
 
-    # ---------------- 对外入口 ----------------
+    # ---------------- public entry ----------------
 
     async def fetch(self, name: str, work: str = "", image_url: str = "") -> Path | None:
-        """取立绘：本地 → 缓存 → 已知地址直下 → 在线搜索下载。
+        """local -> cache -> known url -> search and download. None if all fail.
 
-        ``image_url`` 由 Bangumi 角色池直接给出时跳过搜索，少打一次接口。
-        失败会写 30 分钟的 miss 标记（不要太长，网络抖动一次不该封一整天）。
+        image_url comes straight from the character pool, so no search needed.
+        A failure only blocks retries for 30 minutes: one bad minute of
+        network should not cost a character a whole day.
         """
         if self.source == "off" or not name.strip():
             return None
@@ -148,7 +149,7 @@ class ImageFetcher:
             if cached:
                 return cached
 
-            # 之前 resolve_url 拿过地址就直接用，省一次搜索
+            # reuse a url from resolve_url and skip the search
             known = image_url or self._urls.get(self._cache_prefix(name), "")
             if known:
                 path = await self._download_direct(name, known)
@@ -183,10 +184,10 @@ class ImageFetcher:
             return None
 
     async def resolve_url(self, name: str, work: str = "", image_url: str = "") -> str:
-        """只拿图片的公网地址，不下载。
+        """Return the public url only, no download.
 
-        QQ 官方机器人的 Markdown 消息要 ``![](公网URL)`` 才能内嵌图片，
-        平台会自己去下载转存，所以这里只需要地址。
+        QQ markdown needs ![](url) to inline an image; the platform fetches
+        and rehosts it on its own.
         """
         if image_url.startswith("http"):
             return image_url
@@ -242,7 +243,7 @@ class ImageFetcher:
         else:
             self._urls = {}
 
-    # ---------------- 本地 ----------------
+    # ---------------- local files ----------------
 
     def _find_local(self, name: str, work: str) -> Path | None:
         if not self.local_dir or not self.local_dir.is_dir():
@@ -253,7 +254,7 @@ class ImageFetcher:
             path = self.local_dir / filename
             if path.is_file() and path.stat().st_size > 0:
                 return path
-        # 大小写/空格差异兜底：按归一化名匹配
+        # fall back to normalized-name matching for case / spacing differences
         target = norm(name)
         for path in self.local_dir.iterdir():
             if not path.is_file() or path.suffix.lower() not in ALLOWED_EXT:
@@ -265,7 +266,7 @@ class ImageFetcher:
                 return path
         return None
 
-    # ---------------- 镜像 ----------------
+    # ---------------- mirrors ----------------
 
     @staticmethod
     def _split_values(values: list[str] | str | None) -> list[str]:
@@ -294,11 +295,10 @@ class ImageFetcher:
         api_bases: list[str] | str | None,
         api_base: str | None = None,
     ) -> list[str]:
-        """API 地址列表：镜像优先，官方恒定兜底。
+        """API candidates: configured bases with the official one appended last.
 
-        - 未配置 → 内置镜像 + 官方；
-        - 配置了 ``api_bases``（列表）→ 配置项 + 官方；
-        - 只配置了旧版 ``api_base``（字符串）→ 该地址 + 官方。
+        Nothing configured -> built-in mirrors + official.
+        Legacy single ``api_base`` string is still honoured.
         """
         configured = cls._split_values(api_bases)
         if not configured:
@@ -309,11 +309,11 @@ class ImageFetcher:
         return configured
 
     def api_candidates(self) -> list[str]:
-        """角色搜索的接口候选顺序。"""
+        """Order in which the API bases are tried."""
         return list(self.api_bases)
 
     def mirror_candidates(self, url: str) -> list[str]:
-        """按配置顺序生成候选地址，最后回源官方。"""
+        """Rewrite one url onto every mirror, original last."""
         candidates: list[str] = []
         for mirror in self.mirrors:
             candidate = to_mirror(url, mirror)
@@ -323,10 +323,10 @@ class ImageFetcher:
             candidates.append(url)
         return candidates
 
-    # ---------------- 缓存 ----------------
+    # ---------------- cache ----------------
 
     def _cache_prefix(self, name: str) -> str:
-        # 带版本号：改名/换匹配策略后旧缓存自动失效，避免继续用配错人的图
+        # versioned, so stale (possibly wrong) images stop being reused
         return hashlib.sha1(f"v{CACHE_VERSION}|{norm(name)}".encode("utf-8")).hexdigest()
 
     def _find_cached(self, name: str) -> Path | None:
@@ -352,10 +352,10 @@ class ImageFetcher:
         except OSError:
             pass
 
-    # ---------------- 网络 ----------------
+    # ---------------- network ----------------
 
     async def _download_from_bangumi(self, name: str) -> Path | None:
-        """接口按「镜像 → 官方」逐个试；取到图片地址后再按镜像顺序下载。"""
+        """Try each API base, then download from the url it returns."""
         try:
             import aiohttp
         except ImportError:
@@ -379,10 +379,11 @@ class ImageFetcher:
         return None
 
     async def _search_image_urls(self, session, base: str, name: str) -> list[str]:
-        """按角色名搜索，返回**多个尺寸**的图片地址（大的优先，小的兜底）。
+        """Search characters by name, return image urls, largest first.
 
-        只接受**同名**的角色。找不到就返回空 —— 绝不能拿搜索结果的第一个人凑数，
-        否则「水无月椰子」会被配上「水無月妙子」的图。
+        Exact name only. When nothing matches we return empty instead of
+        falling back to the first hit, which used to attach the wrong
+        character's picture to the card.
         """
         payload = {"keyword": name, "filter": {"nsfw": False}}
         try:
@@ -425,12 +426,12 @@ class ImageFetcher:
         return urls
 
     async def _search_image_url(self, session, base: str, name: str) -> str:
-        """兼容旧调用：只返回首个地址。"""
+        """Legacy helper, single url only."""
         urls = await self._search_image_urls(session, base, name)
         return urls[0] if urls else ""
 
     async def _download(self, session, urls: list[str] | str, name: str) -> Path | None:
-        """逐个尺寸 × 逐个镜像尝试，任一成功即落盘。"""
+        """Try size by size, mirror by mirror, keep the first that lands."""
         candidates: list[str] = []
         for url in [urls] if isinstance(urls, str) else urls:
             for candidate in self.mirror_candidates(url):

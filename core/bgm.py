@@ -1,16 +1,12 @@
-"""Bangumi 角色池：从镜像 API 抽取「名单外」的角色。
+"""Draws characters that are not in the bundled list, via a Bangumi mirror.
 
-为什么单独一个模块：
-- 抽签是核心功能，必须离线可用 —— 任何网络失败都只返回空，由调用方回落本地名单；
-- 同一天的结果必须稳定 —— 命中过的抽签结果落盘，即使接口改了也不会变；
-- 接口优先走镜像，官方作为最后一层兜底，和立绘下载保持一致。
+The daily draw must not depend on the network, so every failure here returns
+None and the caller falls back to the local list. Results are cached on disk,
+which keeps a day's pick stable and reproducible offline.
 
-缓存结构（``bgm_pool.json``）::
-
-    {
-      "works": {"CLANNAD": {"at": 1690000000, "items": [...]}},
-      "picks": {"<sha1(seed)>": {"name": "古河渚", "work": "CLANNAD", "image": "https://..."}}
-    }
+bgm_pool.json holds two maps:
+  works: subject name -> character list (7 day TTL)
+  picks: seed hash -> the character picked for it (kept forever)
 """
 
 from __future__ import annotations
@@ -31,20 +27,20 @@ from .store import norm as _norm
 
 POOL_FILE = "bgm_pool.json"
 WORKS_TTL = 7 * 86400
-"""作品角色表缓存 7 天，避免每次抽签都打接口。"""
+"""Character lists are cached for 7 days."""
 
 FAIL_TTL = 3600
-"""接口失败后 1 小时内不再重试，防止网络异常时每条消息都卡住。"""
+"""After a failure, back off for an hour instead of timing out every command."""
 
 MAX_ITEMS = 40
-"""单个作品最多缓存多少个角色，控制文件体积。"""
+"""Cap per subject so the cache file stays small."""
 
 MIN_POOL = 6
-"""作品可用角色少于这个数就不用它抽 —— 否则每次都抽到同一两个人。"""
+"""Subjects with fewer usable characters are skipped, or the same face keeps showing up."""
 
 
 def _has_kana(text: str) -> bool:
-    """是否包含平假名/片假名（用来判断「名字是日文音译」而不是另一个汉字名）。"""
+    """True if the text contains kana, i.e. a transliteration rather than a kanji name."""
     return any(
         "\u3040" <= ch <= "\u30ff" or "\uff66" <= ch <= "\uff9f" for ch in text
     )
@@ -55,10 +51,10 @@ def _digest(text: str) -> str:
 
 
 def _subject_score(item: dict, target: str) -> int:
-    """作品匹配打分：完全同名 > 前缀相同 > 互相包含；0 表示不匹配。
+    """Similarity score for a subject; 0 means no relation.
 
-    Bangumi 的作品搜索是按关键词模糊匹配的，直接取第一条经常张冠李戴
-    （例如搜「缘之空」会先返回「缘之绳」），所以必须自己算相似度。
+    Bangumi's subject search is loose and often ranks an unrelated title
+    first, so the score has to be computed locally.
     """
     if not target:
         return 0
@@ -77,7 +73,7 @@ def _subject_score(item: dict, target: str) -> int:
 
 
 class BangumiPool:
-    """按作品名从 Bangumi（镜像优先）拉角色，并做确定性抽取。"""
+    """Fetches characters per subject and picks one from the seed."""
 
     def __init__(
         self,
@@ -92,7 +88,7 @@ class BangumiPool:
         self.data: dict[str, dict[str, Any]] = {"works": {}, "picks": {}, "subjects": {}}
         self._load()
 
-    # ---------------- 持久化 ----------------
+    # ---------------- persistence ----------------
 
     def _load(self) -> None:
         try:
@@ -123,12 +119,13 @@ class BangumiPool:
         except OSError:
             pass
 
-    # ---------------- 抽取 ----------------
+    # ---------------- draw ----------------
 
     async def draw(self, work: str, seed: str) -> tuple[Heroine, str] | None:
-        """在 ``work`` 的角色里确定性地取一个，返回 (角色, 立绘地址)。
+        """Pick one character of this subject by seed. Returns (heroine, url).
 
-        失败返回 ``None``，调用方应回落到本地名单。
+        None means "cannot use this subject", the caller falls back to the
+        local list.
         """
         work = (work or "").strip()
         if not work:
@@ -144,7 +141,7 @@ class BangumiPool:
 
         items = await self._characters(work)
         if len(items) < MIN_POOL:
-            # 角色太少的作品直接弃用，避免「一抽就是那一个」
+            # skip subjects with too few characters
             return None
 
         chosen = items[pick_index(seed, len(items))]
@@ -162,18 +159,18 @@ class BangumiPool:
         picks = self.data["picks"]
         if len(picks) <= 2000:
             return
-        # 只保留最近写入的一批，避免文件无限膨胀
+        # keep only the most recent picks so the file does not grow forever
         for old in list(picks)[: len(picks) - 2000]:
             picks.pop(old, None)
 
-    # ---------------- 按作品找立绘 ----------------
+    # ---------------- image lookup by subject ----------------
 
     async def find_image(self, work: str, name: str) -> str:
-        """在**指定作品**的角色表里找这个人，返回立绘地址；找不到返回 ""。
+        """Find this character inside the subject, return its image url or "".
 
-        先精确同名，再退化到「唯一前缀匹配」（冬马和纱 → 冬馬かずさ）。
-        因为范围限定在同一部作品里，前缀匹配基本不会认错人；
-        全局搜索才容易把「水无月椰子」配成「水無月妙子」。
+        Exact name first, then a looser prefix match (冬马和纱 -> 冬馬かずさ).
+        Staying inside one subject is what makes the loose match safe; a
+        global search is where the wrong character gets picked.
         """
         if not work or not name:
             return ""
@@ -196,16 +193,16 @@ class BangumiPool:
                 for item in items
                 if _name_key(str(item.get("name") or "")).startswith(head)
             ]
-            # 只认「姓氏相同 + 名字是假名」这一种情况：
-            # 冬马和纱 → 冬馬かずさ（かずさ 是假名，中译名本来就对不上）
-            # 而 水无月椰子 → 水無月妙子 名字都是汉字，属于不同的人，绝不能认
+            # only accept "same surname + kana given name":
+            #   冬马和纱 -> 冬馬かずさ  (kana; the Chinese name never matches literally)
+            #   水无月椰子 -> 水無月妙子 is someone else, must not match
             if len(hits) == 1:
                 rest = _name_key(str(hits[0].get("name") or ""))[len(head) :]
                 if _has_kana(rest):
                     return str(hits[0].get("image") or "")
         return ""
 
-    # ---------------- 接口 ----------------
+    # ---------------- api ----------------
 
     async def _characters(self, work: str) -> list[dict[str, str]]:
         entry = self.data["works"].get(work)
@@ -219,7 +216,7 @@ class BangumiPool:
 
         lock = self._locks.setdefault(work, asyncio.Lock())
         async with lock:
-            # 双检：等锁期间可能已被别的协程填好
+            # double check: another coroutine may have filled it while we waited
             entry = self.data["works"].get(work)
             if isinstance(entry, dict):
                 age = time.time() - float(entry.get("at") or 0)
@@ -238,10 +235,10 @@ class BangumiPool:
             return items
 
     async def _fetch_characters(self, work: str) -> list[dict[str, str]]:
-        """作品名 → 作品 ID → 角色列表。
+        """Resolve the subject name to an id, then list its characters.
 
-        注意 Bangumi 的 ``/v0/search/characters`` 是按**角色名**搜的，
-        用作品名去搜会返回空，所以这里走「搜作品 → 取作品角色」两步。
+        /v0/search/characters matches character names only, so searching a
+        subject title there returns nothing. Two steps are required.
         """
         try:
             import aiohttp
@@ -290,7 +287,7 @@ class BangumiPool:
             score = _subject_score(item, target)
             if score and (best is None or score > best[0]):
                 best = (score, item)
-        # 完全没有像样的匹配就当作查不到，宁可回落本地名单也不要张冠李戴
+        # no decent match -> treat as not found and fall back to the local list
         if best is None:
             return None
         try:

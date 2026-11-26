@@ -1,8 +1,7 @@
-"""纯文本卡片渲染。
+"""Builds the text cards: title / divider / body / footer, that's it.
 
-统一结构：``标题 → 分隔线 → 主体 → 分隔线 → 页脚``。
-刻意不用 Markdown、不用表格、不用对齐空格：
-QQ / 微信 / OneBot 客户端对中文与 emoji 的宽度处理不一致，对齐必然错位。
+No tables, no space padding - CJK and emoji widths differ per client,
+so alignment always breaks. Plain line breaks are safer.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ from .theme import DIVIDER, fortune_bar, fortune_style, numbered, short_link, sh
 
 
 def card(header: str, body: Iterable[str], footer: Sequence[str] = ()) -> str:
-    """拼装一张卡片；自动丢弃空行，保证不出现连续空行。"""
+    """Assemble one card. Blank lines are dropped so we never get double dividers."""
     body_lines = [line.rstrip() for line in body if line and line.strip()]
     footer_lines = [line.rstrip() for line in footer if line and line.strip()]
 
@@ -28,13 +27,13 @@ def card(header: str, body: Iterable[str], footer: Sequence[str] = ()) -> str:
     return "\n".join(lines)
 
 
-# ---------------- 今日老婆 ----------------
+# ---------------- daily draw ----------------
 
 DAILY_TITLE = "🌙 今日老婆"
 
 MARKDOWN_IMAGE_W = 240
 MARKDOWN_IMAGE_H = 320
-"""QQ 官方 Markdown 的图片尺寸提示（3:4，Gal 立绘基本都是竖图）。"""
+"""Size hint for QQ markdown images (3:4, most character art is portrait)."""
 
 
 def _fortune_line(fortune: str, markdown: bool = False) -> str:
@@ -44,7 +43,7 @@ def _fortune_line(fortune: str, markdown: bool = False) -> str:
 
 
 def _daily_name(heroine: Heroine, markdown: bool = False) -> str:
-    """名字是整张卡的主角，纯文本用【】框住，Markdown 用一级标题顶格。"""
+    """The name is the headline: boxed in plain text, H1 in markdown."""
     label = heroine.label
     return f"# {label}" if markdown else f"【{label}】"
 
@@ -63,8 +62,8 @@ def _daily_body_lines(
         lines.append(f"📍 {spot.name}")
         link = short_link(spot.link, link_style)
         if link:
-            # Markdown 用 <url> 包一层，既显示完整地址又能点开；
-            # 纯文本直接给裸 URL，客户端会自动识别成链接。
+            # markdown: wrap in <url> so the full address shows and stays tappable
+            # plain text: bare URL, clients linkify it themselves
             lines.append(f"<{link}>" if markdown else f"🔗 {link}")
     return lines
 
@@ -95,7 +94,7 @@ def daily_parts(
     spot_total: int = 0,
     link_style: str = "full",
 ) -> tuple[str, str]:
-    """把卡片切成「名字前」与「名字后」两段，中间留给立绘。
+    """Split the card right after the name so the image can go in between.
 
     OneBot 这类支持图文混排的平台用它实现「图片插在名字下面、只发一条消息」。
     """
@@ -145,7 +144,7 @@ def daily_markdown(
     link_style: str = "full",
     image_url: str = "",
 ) -> str:
-    """QQ 官方等支持 Markdown 的平台用这一版：图片用 ``![](url)`` 内嵌在名字下面。
+    """Markdown variant for QQ official: image inlined via ![](url) under the name.
 
     注意 QQ 的图片语法**必须带尺寸**（``![alt #宽px #高px](url)``），
     只写 ``![alt](url)`` 会被当成链接、图不出来。
@@ -159,7 +158,7 @@ def daily_markdown(
     return "\n".join(lines)
 
 
-# ---------------- 圣地 ----------------
+# ---------------- pilgrimage ----------------
 
 
 def spot_card(
@@ -201,7 +200,7 @@ def works_card(
     return card(f"📚 圣地作品库 · {total_works} 部", body, footer)
 
 
-# ---------------- 提示类 ----------------
+# ---------------- notices ----------------
 
 
 def not_found(query: str, suggestions: list[str]) -> str:
@@ -247,7 +246,7 @@ def usage(text: str) -> str:
 
 
 def no_image() -> str:
-    """一张立绘都拉不到时用它代替整张卡 —— 宁可少发一条，也不发没图的卡。"""
+    """Shown instead of a card when no art could be fetched at all."""
     return card(
         "🖼️ 这次没拉到立绘",
         [],
@@ -260,16 +259,16 @@ def error_card() -> str:
 
 
 def info_card(title: str, message: str) -> str:
-    """结果回执：标题给结论，正文给细节，不再重复「💡」。"""
+    """Result receipt: verdict in the title, details in the body."""
     return card(title, [message] if message else [])
 
 
 def tip_card(title: str, tip: str) -> str:
-    """状态提示：标题说明状态，页脚给一条建议。"""
+    """Status notice: state in the title, one hint in the footer."""
     return card(title, [], [f"💡 {tip}"] if tip else [])
 
 
-# ---------------- 帮助 / 统计 ----------------
+# ---------------- help / stats ----------------
 
 
 def help_card(stats: dict[str, int] | None = None, prefix: str = "/") -> str:
@@ -305,7 +304,7 @@ def stats_card(stats: dict[str, int], data_path: str) -> str:
 
 
 def diagnose_card(rows: list[tuple[str, str]], warnings: list[str]) -> str:
-    """自检卡片：把运行环境的关键事实摊开，方便排查「更新不了 / 没图」类问题。"""
+    """Self-check card: dumps the facts needed to debug update / image issues."""
     body = [f"{key} · {value}" for key, value in rows]
     footer = [f"⚠️ {w}" for w in warnings]
     if not footer:
@@ -313,11 +312,11 @@ def diagnose_card(rows: list[tuple[str, str]], warnings: list[str]) -> str:
     return card("🩺 GalUniverse 自检", body, footer)
 
 
-# ---------------- 分页 ----------------
+# ---------------- paging ----------------
 
 
 def page_slice(items: list, page: int, page_size: int) -> tuple[list, int, int]:
-    """返回 (当前页内容, 页码, 总页数)，页码从 1 开始并自动收敛。"""
+    """Return (page items, page, total pages); page is 1-based and clamped."""
     size = max(1, page_size)
     total_pages = max(1, (len(items) + size - 1) // size)
     page = min(max(1, page), total_pages)

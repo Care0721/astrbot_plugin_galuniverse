@@ -1,10 +1,9 @@
-"""持久化层：JSON 存储、原子写入、旧 TXT 迁移、检索与去重。
+"""Persistence layer. Writes go through a temp file + os.replace, so a crash
+never leaves a half-written JSON behind.
 
-设计要点：
-- 数据落在 ``data/plugin_data/<plugin>/``，插件升级/重装不丢；
-- 写入使用临时文件 + ``os.replace``，避免进程中断导致 JSON 截断；
-- 旧版 ``wives.txt`` / ``spots.txt`` 只做单向导入，导入后不再回写；
-- 同一作品支持多个圣地（旧版用 dict 导致互相覆盖）。
+Data lives in data/plugin_data/<plugin>/ instead of the plugin folder, so
+reinstalling the plugin does not wipe it. The old wives.txt / spots.txt are
+read-only imports.
 """
 
 from __future__ import annotations
@@ -27,10 +26,10 @@ LEGACY_FILES = ("wives.txt", "spots.txt")
 MAX_SPOTS = 5000
 MAX_HEROINES = 5000
 THIN_POOL = 50
-"""名单少于这个数量就认为「数据没迁移成功」，自动补入内置角色。"""
+"""Below this count the data probably never migrated, so top up from the builtins."""
 
 RECENT_KEEP = 20
-"""每个 scope 记住最近多少次抽取，用于避免短时间内反复抽到同一个人。"""
+"""How many recent draws each scope remembers, used to avoid repeats."""
 
 
 @dataclass
@@ -74,17 +73,18 @@ _T2S = str.maketrans(
 
 
 def name_key(text: str) -> str:
-    """角色名归一化：去空白 + 大写 + 常见繁体/日文汉字转简体。
+    """Key used for name comparison: no spaces, upper case, and traditional /
+    Japanese kanji folded to simplified.
 
-    内置名单用的是简体中译名（冬马和纱、小木曾雪菜），而 Bangumi 返回的是
-    日文原名（冬馬かずさ、小木曽雪菜）。不归一化就永远对不上，
-    只能退而取「搜索结果的第一个人」—— 那正是「图片配错人」的根源。
+    The bundled list uses Chinese names (冬马和纱) while Bangumi returns the
+    original ones (冬馬かずさ). Without folding they never match, and picking
+    the first search hit gives the wrong character's picture.
     """
     return norm(text).translate(_T2S)
 
 
 class GalStore:
-    """线程内使用的同步存储，调用方用 ``asyncio.to_thread`` 包一层即可。"""
+    """Synchronous. Do not call it on the event loop, wrap with asyncio.to_thread."""
 
     def __init__(self, data_dir: Path, assets_dir: Path, legacy_dirs: Iterable[Path] = ()) -> None:
         self.data_dir = Path(data_dir)
@@ -97,11 +97,11 @@ class GalStore:
         self._spot_keys: set[str] = set()
         self._dirty = False
 
-    # ---------------- 载入 ----------------
+    # ---------------- load ----------------
 
     def load(self, legacy_import: bool = True) -> LoadReport:
         report = LoadReport()
-        # 支持热重载：先清空内存状态，避免重复累加
+        # reload support: clear in-memory state first, otherwise it accumulates
         self.heroines.clear()
         self.spots.clear()
         self._heroine_keys.clear()
@@ -112,7 +112,7 @@ class GalStore:
         if self.path.exists():
             payload = self._read_json(self.path)
             if not payload.get("heroines") and not payload.get("spots"):
-                # 文件损坏或为空：回退内置资产，保证插件仍可用
+                # corrupt or empty file: fall back to bundled data so the plugin still works
                 payload = self._read_defaults()
                 report.created = True
                 self._dirty = True
@@ -139,7 +139,7 @@ class GalStore:
                 data = json.load(f)
             return data if isinstance(data, dict) else {}
         except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-            # 文件损坏：备份后回退到默认资产，避免整个插件起不来
+            # corrupt file: keep a copy, then fall back to the bundled data
             try:
                 shutil.copy2(path, path.with_suffix(f".broken-{int(time.time())}.json"))
             except OSError:
@@ -192,7 +192,7 @@ class GalStore:
         return {"version": SCHEMA_VERSION, "heroines": heroines, "spots": spots}
 
     def _read_legacy(self, report: LoadReport) -> dict:
-        """读取旧版 txt。格式：女主每行一个；圣地 游戏|地点|链接。"""
+        """Read the legacy txt: one heroine per line, spots as work|place|link."""
         heroines: list[dict] = []
         spots: list[dict] = []
         found = False
@@ -224,7 +224,7 @@ class GalStore:
             return []
         return [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
 
-    # ---------------- 保存 ----------------
+    # ---------------- save ----------------
 
     def save(self) -> None:
         payload = {
@@ -253,7 +253,7 @@ class GalStore:
         self._heroine_keys = {h.key for h in self.heroines}
         self._spot_keys = {s.key for s in self.spots}
 
-    # ---------------- 写操作 ----------------
+    # ---------------- mutations ----------------
 
     def add_heroine(self, raw: str) -> tuple[bool, str]:
         name, work = split_name_work(raw)
@@ -315,7 +315,7 @@ class GalStore:
         self.save()
         return len(removed), removed
 
-    # ---------------- 查询 ----------------
+    # ---------------- queries ----------------
 
     def find_spots(self, query: str, fuzzy: bool = True, limit: int = 5) -> list[Spot]:
         q = norm(query)
@@ -347,7 +347,7 @@ class GalStore:
         return sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))
 
     def merge_legacy(self) -> tuple[int, int]:
-        """把旧 TXT 中尚不存在的条目补进来（幂等，可反复执行）。"""
+        """Merge anything missing from the legacy txt. Idempotent."""
         report = LoadReport()
         payload = self._read_legacy(report)
         added_h = added_s = 0
@@ -368,7 +368,7 @@ class GalStore:
         return added_h, added_s
 
     def merge_payload(self, payload: dict) -> tuple[int, int]:
-        """把任意 gal.json 结构里的条目补进来（幂等），返回 (新增女主, 新增圣地)。"""
+        """Merge entries from a gal.json payload. Returns (new heroines, new spots)."""
         added_h = added_s = 0
         for raw in payload.get("heroines") or []:
             if not isinstance(raw, dict):
@@ -403,10 +403,9 @@ class GalStore:
         return added_h, added_s
 
     def merge_builtin_defaults(self, thin: int = THIN_POOL) -> int:
-        """名单异常稀少时补入内置角色，避免「抽来抽去就那几个」。
+        """Top up with bundled heroines when the list is suspiciously short.
 
-        只在女主数量低于 ``thin`` 时触发，正常使用的用户不受影响；
-        用户自己删掉的条目不会被反复复活（只在数据明显残缺时兜底一次）。
+        只在低于 thin 时动手，正常用户碰不到。用户自己删的人不会天天复活。
         """
         if len(self.heroines) >= thin:
             return 0
@@ -414,10 +413,10 @@ class GalStore:
         return added
 
     def import_from_dirs(self, dirs: Iterable[Path]) -> tuple[int, int]:
-        """从旧插件名遗留的数据目录补录数据。
+        """Merge data left behind by the previous plugin name.
 
-        插件改名（astrbot_plugin_galuniverse → astrbot_plugin_universe）后，
-        旧数据躺在另一个 plugin_data 子目录里，这里做一次幂等合并。
+        改名那次（galuniverse → universe）数据留在了另一个 plugin_data 子目录，
+        不搬过来的话用户会觉得「老婆少了」。
         """
         added_h = added_s = 0
         for directory in dirs:
@@ -439,7 +438,7 @@ class GalStore:
 
 
 class StateStore:
-    """每日抽签/重抽的轻量状态，单独存文件避免频繁重写主数据。"""
+    """Draw state: reroll counters and recent picks. Kept apart from the main data."""
 
     def __init__(self, data_dir: Path) -> None:
         self.path = Path(data_dir) / STATE_FILE
@@ -469,11 +468,11 @@ class StateStore:
             }
 
     def save(self, today: str | None = None) -> None:
-        """保存状态；``today`` 传入插件配置时区的当天日期，避免时区错位误删记录。"""
+        """Pass today in the configured timezone; server local time would prune the wrong rows."""
         keep = today or time.strftime("%Y-%m-%d")
-        # 只保留当天记录，防止无限膨胀
+        # keep today only, otherwise the file grows forever
         self.data = {k: v for k, v in self.data.items() if v.get("date") == keep}
-        # 抽取历史只留最近若干条
+        # keep just the tail of the draw history
         self.history = {
             k: v[-RECENT_KEEP:] for k, v in self.history.items() if v
         }
@@ -502,10 +501,10 @@ class StateStore:
         self.save(today)
         return used
 
-    # ---------------- 抽取历史 ----------------
+    # ---------------- draw history ----------------
 
     def recent_names(self, scope: str, exclude_date: str = "") -> set[str]:
-        """返回该 scope 最近抽过的角色名（可排除某一天，避免「自己撞自己」）。"""
+        """Names drawn recently by this scope. exclude_date skips today."""
         entries = self.history.get(scope) or []
         return {
             str(e.get("name"))

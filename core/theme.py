@@ -1,7 +1,6 @@
-"""视觉规范常量：分隔线、签运映射、链接与路径压缩。
+"""Style constants: divider, fortune levels, link and path formatting.
 
-约束来源：QQ/微信客户端中文字符与 emoji 宽度不一致，
-因此所有模板都避免表格对齐，只用线性排列 + 固定宽度分隔线。
+Do not fight the clients over character widths - just stack lines.
 """
 
 from __future__ import annotations
@@ -9,7 +8,7 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 DIVIDER = "━" * 12
-"""统一分隔线：12 个全角字符，手机端不会折行。"""
+"""12 full-width chars, fits one line on mobile."""
 
 FORTUNE_STYLES: dict[str, tuple[str, int]] = {
     "超大吉": ("🌈", 7),
@@ -30,24 +29,23 @@ def fortune_style(fortune: str) -> tuple[str, int]:
 
 
 def fortune_bar(fortune: str, size: int = 7) -> str:
-    """签运进度条，凶=1 格，超大吉=7 格。"""
+    """Fortune bar: 凶 is 1 block, 超大吉 is 7."""
     _, filled = fortune_style(fortune)
     filled = max(1, min(size, filled))
     return "▰" * filled + "▱" * (size - filled)
 
 
 def numbered(index: int) -> str:
-    """1 → ①；超过 20 时退回 "21."。"""
+    """1 -> ①; past 20 fall back to plain "21."."""
     if 1 <= index <= len(CIRCLED):
         return CIRCLED[index - 1]
     return f"{index}."
 
 
 def clickable(url: str) -> str:
-    """补全 scheme，保证 QQ / Telegram / Discord 等客户端能识别成可点击链接。
+    """Add the scheme so clients turn it into a tappable link.
 
-    纯文本消息里的 ``https://`` 链接会被各客户端自动转成可点击卡片；
-    而 ``zh.moegirl.org.cn/xxx`` 这种缺 scheme 的写法多数客户端不会识别。
+    With https:// most clients auto-linkify; without it you just get text.
     """
     url = (url or "").strip()
     if not url:
@@ -60,7 +58,7 @@ def clickable(url: str) -> str:
 
 
 def short_link(url: str, style: str = "full") -> str:
-    """按配置输出链接：完整可点击 URL（默认）/ 域名+首段路径 / 不显示。"""
+    """Render a link: full URL (default) / domain + first segment / nothing."""
     url = (url or "").strip()
     if not url or style == "hidden":
         return ""
@@ -80,6 +78,6 @@ def short_link(url: str, style: str = "full") -> str:
 
 
 def short_path(path: str) -> str:
-    """只保留最后两段路径，避免刷屏。"""
+    """Keep the last two segments, full paths are too noisy."""
     parts = [p for p in str(path).replace("\\", "/").split("/") if p]
     return "/".join(parts[-2:]) if len(parts) >= 2 else str(path)

@@ -1,1 +1,1 @@
-"""GalUniverse 核心逻辑包（纯标准库，可脱离 AstrBot 单测）。"""
+"""Core logic for GalUniverse. Stdlib only, so it can be tested without AstrBot."""

@@ -1,12 +1,11 @@
-"""GalUniverse Pro v2 — AstrBot 插件入口。
+"""GalUniverse Pro - AstrBot plugin entry point.
 
-适配说明：
-- 平台无关：只依赖 AstrBot 抽象层（plain_result / chain_result），
-  OneBot(aiocqhttp)、QQ 官方、Telegram、Discord 均可直接使用；
-- OneBot 专属增强：群聊可选用 @发送者 回复、长消息自动分段、
-  管理权限兼容 ``admins_id`` 全局配置与插件内 ``extra_admin_ids``；
-- 指令参数自行解析（而非依赖装饰器注入），避免 OneBot 下
-  "古河渚 (CLANNAD)"、"Summer Pockets" 这类含空格参数被截断。
+Only the platform-agnostic AstrBot API is used (plain_result / chain_result),
+so aiocqhttp, QQ official, Telegram and Discord all work as-is.
+
+Two OneBot extras: optional @sender on group replies and splitting long
+messages. Arguments are parsed by hand instead of via decorator injection,
+because names like "古河渚 (CLANNAD)" or "Summer Pockets" contain spaces.
 """
 
 from __future__ import annotations
@@ -36,20 +35,20 @@ PLUGIN_NAME = "astrbot_plugin_universe"
 VERSION = "2.1.1"
 
 MARKDOWN_PLATFORMS = {"qq_official", "qq_official_webhook"}
-"""原生支持 Markdown 的平台。QQ 官方机器人群聊/单聊已全量开放。"""
+"""Platforms with native markdown support."""
 
 MAX_CANDIDATES = 6
-"""一次抽取最多尝试几个候选（用于避开「最近抽过」和「没有立绘」的人）。"""
+"""How many candidates one draw may try, skipping recent picks and missing art."""
 
 LEGACY_PLUGIN_NAMES = ("astrbot_plugin_galuniverse",)
-"""历史版本用过的插件名。数据目录跟着插件名走，改名后需要做一次补录。"""
+"""Plugin names used by older releases. The data dir follows the name."""
 
 LEGACY_ADVICE_DEFAULTS = {
     "今天适合重温一段旧剧情，别忘了存档。",
     "去听听 OST 吧，情绪会被温柔地接住。",
     "给喜欢的人发一句晚安，今天就算圆满。",
 }
-"""v2.0.3 及更早版本的默认建议文案。配置里原封不动还是这套时自动换成新版。"""
+"""Advice lines shipped up to v2.0.3, replaced automatically when untouched."""
 
 ADMIN_SUBS = {
     "添加老婆",
@@ -100,7 +99,7 @@ class GalUniversePlugin(Star):
         self.legacy_data_dirs = self._legacy_data_dirs()
         self._lock = asyncio.Lock()
 
-    # ---------------- 生命周期 ----------------
+    # ---------------- lifecycle ----------------
 
     async def initialize(self) -> None:
         await self._load_data(legacy_import=bool(self._cfg("legacy_import", True)))
@@ -114,11 +113,11 @@ class GalUniversePlugin(Star):
     async def _load_data(self, legacy_import: bool = False) -> str:
         async with self._lock:
             report = await asyncio.to_thread(self.store.load, legacy_import)
-            # 旧插件名遗留的数据目录：幂等补录，避免改名后「老婆变少了」
+            # merge data left over from the old plugin name, idempotent
             added_h, added_s = await asyncio.to_thread(
                 self.store.import_from_dirs, self.legacy_data_dirs
             )
-            # 名单异常稀少时补入内置角色，避免「抽来抽去就那几个」
+            # top up from the bundled list when the pool looks suspiciously small
             filled = await asyncio.to_thread(self.store.merge_builtin_defaults)
         if added_h or added_s:
             logger.info(
@@ -129,7 +128,7 @@ class GalUniversePlugin(Star):
         logger.info(f"[GalUniverse] 数据加载完成：{report.summary()}")
         return report.summary()
 
-    # ---------------- 配置与工具 ----------------
+    # ---------------- config and helpers ----------------
 
     def _cfg(self, key: str, default):
         try:
@@ -148,7 +147,7 @@ class GalUniversePlugin(Star):
             return ""
 
     def _is_admin(self, event: AstrMessageEvent) -> bool:
-        """OneBot 私聊下 role 恒为 member，因此补充白名单兜底。"""
+        """In OneBot private chats role is always member, so fall back to id lists."""
         try:
             if event.is_admin():
                 return True
@@ -175,10 +174,10 @@ class GalUniversePlugin(Star):
             return False
 
     def _advice_pool(self) -> list[str]:
-        """今日建议文案池。
+        """Advice pool for the card.
 
-        AstrBot 会把配置落盘，改了 schema 默认值对老用户不生效，
-        所以这里主动识别「还是旧版那三句」的情况，换成新文案。
+        AstrBot persists the config, so changing the schema default never
+        reaches existing installs. Detect the old default set and swap it.
         """
         raw = self._cfg("advice_pool", []) or []
         if isinstance(raw, str):
@@ -195,7 +194,7 @@ class GalUniversePlugin(Star):
             return ""
 
     def _markdown_enabled(self, event: AstrMessageEvent) -> bool:
-        """是否用 Markdown 渲染。只有平台本身支持时才可能为真。"""
+        """Whether to render markdown. Only ever true on platforms that support it."""
         mode = str(self._cfg("render_mode", "auto") or "auto").strip().lower()
         if mode == "text":
             return False
@@ -205,7 +204,7 @@ class GalUniversePlugin(Star):
 
     @staticmethod
     def _with_markdown(result, markdown: bool):
-        """QQ 官方适配器默认按 Markdown 发送，纯文本模式必须显式关掉。"""
+        """The QQ adapter defaults to markdown, plain-text mode has to opt out."""
         try:
             result.use_markdown(markdown)
         except Exception:
@@ -213,12 +212,12 @@ class GalUniversePlugin(Star):
         return result
 
     async def _reply(self, event: AstrMessageEvent, text: str):
-        """统一出口：长消息分段；@ 只在 OneBot 生效。"""
+        """Single send path: split long text, @sender only on OneBot."""
         limit = parse_int(self._cfg("max_chars_per_message", 1000), 1000)
         want_at = bool(self._cfg("reply_with_at", False))
         in_group = bool(event.get_group_id())
         platform = self._platform(event)
-        # QQ 官方机器人会把 At 组件渲染成 <qqbot-at-user id="..."/> 纯文本，只能关掉
+        # QQ official serializes an At component into literal <qqbot-at-user/> text
         use_at = want_at and in_group and platform == "aiocqhttp"
         markdown = self._markdown_enabled(event)
 
@@ -254,10 +253,10 @@ class GalUniversePlugin(Star):
     async def _pick_candidate(
         self, seed: str, allow_mirror: bool = True
     ) -> tuple[Heroine | None, str]:
-        """按 seed 抽一位：镜像池优先，失败回落本地名单。
+        """Pick one by seed: mirror pool first, local list as fallback.
 
-        ``allow_mirror=False`` 时只查本地名单 —— 重试换人时用它，
-        避免一次指令连打好几次 Bangumi 接口。
+        allow_mirror=False skips the API entirely, used when retrying so a
+        single command does not hammer Bangumi.
         """
         if allow_mirror:
             heroine, image_url = await self._pick_from_mirror(seed)
@@ -271,31 +270,32 @@ class GalUniversePlugin(Star):
     async def _draw_daily(
         self, scope_key: str, date_key: str, reroll: int = 0
     ) -> tuple[Heroine | None, str, str, str, Path | None]:
-        """抽今日老婆，返回 (角色, 签运, 建议, 立绘地址, 本地立绘路径)。
+        """Draw today's character. Returns (heroine, fortune, advice, url, path).
 
-        候选序列 ``seed / seed#1 / seed#2 …`` 是确定性的，所以同一天多次触发结果一致；
-        在这条序列上依次跳过「最近几天已经抽过的人」和「拿不到立绘的人」。
+        The candidate sequence seed / seed#1 / seed#2 ... is deterministic,
+        so repeated calls the same day agree. Along that sequence we skip
+        names drawn recently and characters whose art cannot be fetched.
         """
         base_seed = daily_seed(scope_key, date_key, reroll)
         fortune = pick_fortune(base_seed, list(self._cfg("fortune_pool", []) or []))
         advice = pick_advice(base_seed, self._advice_pool())
 
         want_image = self._images_enabled()
-        # 前几天抽过的人：尽量避开，这是「老是那几个人」的根治手段
+        # names drawn on previous days, skipped to stop the same few showing up
         avoid = self.state.recent_names(scope_key, exclude_date=date_key)
         tries = MAX_CANDIDATES if want_image or avoid else 1
         fallback: tuple[Heroine, str] | None = None
 
         for attempt in range(tries):
             seed = base_seed if attempt == 0 else f"{base_seed}#{attempt}"
-            # 只有第一个候选走镜像池，后续换人只在本地名单里挑，保证响应速度
+            # only the first candidate uses the mirror pool; retries stay local
             heroine, image_url = await self._pick_candidate(
                 seed, allow_mirror=(attempt == 0)
             )
             if heroine is None:
                 continue
 
-            # 最近抽过就换下一位（留最后一次机会，避免全被避让掉时抽不出来）
+            # skip recent names, but keep the last attempt so we never end up empty
             if heroine.name in avoid and attempt < tries - 1:
                 continue
 
@@ -320,7 +320,7 @@ class GalUniversePlugin(Star):
         return fallback[0], fortune, advice, fallback[1], None
 
     async def _pick_from_mirror(self, seed: str) -> tuple[Heroine | None, str]:
-        """从 Bangumi 镜像角色池抽一位；不启用或失败时返回 (None, "")。"""
+        """Draw from the mirror pool. Returns (None, "") when disabled or failed."""
         mode = str(self._cfg("pool_source", "hybrid") or "hybrid").strip().lower()
         if mode not in {"hybrid", "bangumi"}:
             return None, ""
@@ -333,22 +333,23 @@ class GalUniversePlugin(Star):
         works = [name for name, _ in self.store.works()]
         if not works:
             return None, ""
-        # 只试一部作品：失败会写 1 小时负缓存，下一天自然换一部，避免指令被网络拖慢
+        # one subject per draw; failures are cached for an hour so the next day picks another
         work = works[pick_index(f"{seed}|work", len(works))]
         try:
             got = await self.pool.draw(work, f"{seed}|{work}")
         except Exception as exc:
             logger.warning(f"[GalUniverse] 镜像角色池异常：{exc}")
             return None, ""
-        # pool.draw 拿不到角色时返回 None，这里必须归一成二元组，
-        # 否则调用方解包会抛 TypeError（之前「今日老婆」偶发报错就是这个）
+        # pool.draw returns None on failure, normalize it to a 2-tuple here
+        # or the caller blows up unpacking it
         return got if got else (None, "")
 
     async def _image_path(self, heroine: Heroine, image_url: str = "") -> Path | None:
-        """拉取角色立绘到本地；任何失败都返回 None，不影响文字卡片。
+        """Fetch the art locally. Any failure returns None, the card still goes out.
 
-        取图顺序：镜像池直给地址 → **在角色所属作品里找同名角色** → 全局同名搜索。
-        先按作品限定范围，能避免「同名不同人」把图配错。
+        Order: url from the pool -> same name inside the subject -> global
+        name search. Scoping to the subject first is what keeps same-name
+        characters from getting the wrong picture.
         """
         if not self._images_enabled():
             return None
@@ -365,10 +366,11 @@ class GalUniversePlugin(Star):
             return None
 
     async def _markdown_image_url(self, path: Path | None, fallback: str) -> str:
-        """Markdown 内嵌图用哪个地址。
+        """Which url to inline in a markdown image.
 
-        优先用 AstrBot 自带的文件服务（``callback_api_base``）—— 那是用户自己的域名，
-        平台一定下得动；没配置或注册失败时再退回 Bangumi 镜像地址。
+        Prefer the AstrBot file service (callback_api_base): it lives on the
+        operator domain, which the platform can always reach. Fall back to
+        the mirror url when it is not configured or registration fails.
         """
         if path is not None:
             try:
@@ -391,13 +393,13 @@ class GalUniversePlugin(Star):
         image_url: str = "",
         path: Path | None = None,
     ):
-        """今日老婆：整张卡片 + 立绘**只发一条消息**。
+        """Daily card plus art, as exactly one message.
 
-        三种形态：
-        - ``auto``（默认）：图片走**附件**上传，平台保证能显示；没有图时才用 Markdown；
-        - ``markdown``：强制 Markdown，图片以 ``![](公网地址)`` 内嵌
-          （需要平台侧能下载那个外链，QQ 不一定通）；
-        - ``text``：强制纯文本 + 图片附件。
+        auto (default): upload the art as an attachment, which always shows;
+                        markdown only when there is no image.
+        markdown:      force markdown with ![](url); the platform has to be
+                       able to fetch that url.
+        text:          plain text plus an attachment.
         """
         spot, total = self._spot_for(heroine)
         common = {
@@ -412,15 +414,15 @@ class GalUniversePlugin(Star):
 
         if self._markdown_enabled(event) and mode in {"auto", "markdown"}:
             if mode == "markdown":
-                # 强制 Markdown：优先文件服务，其次镜像外链
+                # forced markdown: file service first, mirror url second
                 public = await self._markdown_image_url(path, image_url)
                 if not public and path is None:
                     public = await self.images.resolve_url(
                         heroine.name, heroine.work, image_url
                     )
             else:
-                # auto：只有拿到「平台一定下得动」的地址（AstrBot 文件服务）才内嵌，
-                # 否则退回附件 —— 免得 QQ 显示「加载失败」
+                # auto: inline only when the url is guaranteed reachable (file service),
+                # otherwise fall back to an attachment so QQ never shows a broken image
                 public = await self._markdown_image_url(path, "") if path else ""
 
             if public or path is None:
@@ -442,7 +444,7 @@ class GalUniversePlugin(Star):
         yield self._with_markdown(event.chain_result(chain), False)
 
     def _image_mirrors(self) -> list[str] | None:
-        """镜像列表：优先读 image_mirrors，兼容旧的 image_mirror 字符串。"""
+        """Image mirrors. Reads image_mirrors, falls back to the old single value."""
         raw = self._cfg("image_mirrors", None)
         if raw is None:
             raw = self._cfg("image_mirror", None)
@@ -455,10 +457,10 @@ class GalUniversePlugin(Star):
         return None
 
     def _api_bases(self) -> list[str] | None:
-        """Bangumi 接口地址：镜像优先，官方兜底。
+        """API bases, mirrors first with the official host last.
 
-        ``image_api_bases`` 为列表配置；旧版本只写过 ``image_api_base`` 字符串，
-        这里一并兼容，升级后不必手动改配置。
+        image_api_bases is the list option; the older single image_api_base
+        string is still read so upgrades need no manual edits.
         """
         raw = self._cfg("image_api_bases", None)
         if isinstance(raw, str):
@@ -476,7 +478,7 @@ class GalUniversePlugin(Star):
         return None
 
     def _legacy_data_dirs(self) -> list[Path]:
-        """旧插件名对应的数据目录，用于一次性补录。"""
+        """Data dirs left behind by the old plugin name, merged once."""
         base = self.data_dir.parent
         out: list[Path] = []
         for name in LEGACY_PLUGIN_NAMES:
@@ -493,7 +495,7 @@ class GalUniversePlugin(Star):
         return style if style in {"domain", "full", "hidden"} else "full"
 
     def _spot_for(self, heroine: Heroine) -> tuple[Spot | None, int]:
-        """按角色所属作品找圣地，精确匹配优先，其次模糊。"""
+        """Find a pilgrimage spot for this work, exact match first."""
         if not bool(self._cfg("enable_spot_link", True)) or not heroine.work:
             return None, 0
         target = norm(heroine.work)
@@ -510,10 +512,11 @@ class GalUniversePlugin(Star):
 
     @filter.on_decorating_result()
     async def _hide_qq_at_tag(self, event: AstrMessageEvent):
-        """QQ 官方富媒体消息会把 At 组件序列化成 ``<qqbot-at-user id="…"/>`` 文本。
+        """QQ official turns an At component into literal <qqbot-at-user/> text.
 
-        AstrBot 的「回复时 @ 用户」只对「纯文本/图文」消息生效，
-        这里塞一个平台会忽略的占位组件，让它跳过 @ 装饰 —— 否则那串 XML 会直接漏在正文里。
+        The mention-on-reply option only applies to plain text and image
+        messages. Adding a placeholder the platform ignores makes AstrBot
+        skip that decoration, so the raw tag never leaks into the body.
         """
         if Unknown is None or self._platform(event) not in MARKDOWN_PLATFORMS:
             return
@@ -529,7 +532,7 @@ class GalUniversePlugin(Star):
             return
         result.chain.append(Unknown(text=""))
 
-    # ---------------- 抽老婆 ----------------
+    # ---------------- daily draw ----------------
 
     @filter.command("今日老婆", alias={"今日运势", "抽老婆"})
     async def daily_wife(self, event: AstrMessageEvent):
@@ -556,7 +559,7 @@ class GalUniversePlugin(Star):
                     yield msg
                 return
             if path is None and self._images_enabled():
-                # 一张图都拉不下来：不发干巴巴的卡片，直接提示重试
+                # no art at all: skip the bare card and ask the user to retry
                 async for msg in self._reply(event, render.no_image()):
                     yield msg
                 return
@@ -622,7 +625,7 @@ class GalUniversePlugin(Star):
             async for msg in self._reply(event, render.error_card()):
                 yield msg
 
-    # ---------------- 圣地巡礼 ----------------
+    # ---------------- pilgrimage ----------------
 
     @filter.command("圣地巡礼", alias={"巡礼"})
     async def pilgrimage(self, event: AstrMessageEvent):
@@ -706,7 +709,7 @@ class GalUniversePlugin(Star):
             async for msg in self._reply(event, render.error_card()):
                 yield msg
 
-    # ---------------- 管理入口 ----------------
+    # ---------------- admin ----------------
 
     @filter.command("gal", alias={"GAL", "Gal", "gal帮助"})
     async def gal(self, event: AstrMessageEvent):
@@ -863,7 +866,7 @@ class GalUniversePlugin(Star):
             return
 
     def _diagnose_card(self) -> str:
-        """把关键运行事实摊开，专治「更新后名字对不上 / 抽来抽去就那几个」。"""
+        """Dumps the facts needed to debug update and repetition complaints."""
         stats = self.store.stats()
         warnings: list[str] = []
 
@@ -886,7 +889,7 @@ class GalUniversePlugin(Star):
             ("🖼️ 图片镜像", f"{len(self.images.mirrors)} 个"),
         ]
 
-        # 改名遗留：旧目录还在的话，AstrBot 会同时加载两份，指令互相抢占
+        # leftover dir from the rename: AstrBot would load both copies
         for name in LEGACY_PLUGIN_NAMES:
             stale = self.plugin_dir.parent / name
             if stale.is_dir() and stale.resolve() != self.plugin_dir.resolve():

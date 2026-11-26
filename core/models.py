@@ -1,7 +1,4 @@
-"""数据模型：女主与圣地巡礼地点。
-
-只依赖标准库，方便脱离 AstrBot 单测。
-"""
+"""Heroine and pilgrimage spot models. Stdlib only, easy to test standalone."""
 
 from __future__ import annotations
 
@@ -10,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-# 匹配 "古河渚 (CLANNAD)" / "古河渚（CLANNAD）" / "古河渚 - CLANNAD"
+# matches "古河渚 (CLANNAD)" / "古河渚（CLANNAD）" / "古河渚 - CLANNAD"
 _WORK_PAREN = re.compile(r"^(?P<name>.+?)\s*[\(（](?P<work>[^()（）]+)[\)）]\s*$")
 _WORK_DASH = re.compile(r"^(?P<name>.+?)\s+[-—–]\s+(?P<work>.+)$")
 
@@ -20,12 +17,12 @@ MAX_LINK_LEN = 500
 
 
 def make_id(prefix: str, key: str) -> str:
-    """根据内容生成稳定 id，重复导入不会产生新条目。"""
+    """Stable id derived from the content, so re-imports do not create dupes."""
     return prefix + hashlib.sha1(key.encode("utf-8")).hexdigest()[:10]
 
 
 def split_name_work(raw: str) -> tuple[str, str]:
-    """把 "古河渚 (CLANNAD)" 拆成 (名字, 作品)。"""
+    """Split "古河渚 (CLANNAD)" into name and work."""
     text = raw.strip()
     for pattern in (_WORK_PAREN, _WORK_DASH):
         m = pattern.match(text)
@@ -54,7 +51,7 @@ class Heroine:
 
     @property
     def label(self) -> str:
-        """卡片展示用，比 display 更紧凑：古河渚 · CLANNAD。"""
+        """Compact form used on cards: 古河渚 · CLANNAD."""
         return f"{self.name} · {self.work}" if self.work else self.name
 
     @property

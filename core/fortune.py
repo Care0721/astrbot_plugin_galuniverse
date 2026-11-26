@@ -1,7 +1,7 @@
-"""确定性抽签：同一用户同一天结果固定，跨进程、跨重启都一致。
+"""Daily draw. Same scope + same day always lands on the same result.
 
-不用 ``random`` 的字符串种子（实现细节依赖 CPython 版本），
-直接对 sha256 摘要取模，行为可预测、可复现。
+Not using random() on purpose: its string seeding follows the CPython version,
+so results would shift after a Python upgrade.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ DEFAULT_ADVICE = [
 def now_in(tz_name: str) -> datetime:
     try:
         return datetime.now(ZoneInfo(tz_name))
-    except Exception:  # 时区名写错时退回服务器本地时间
+    except Exception:  # bad tz name, fall back to server local time
         return datetime.now(timezone.utc).astimezone()
 
 

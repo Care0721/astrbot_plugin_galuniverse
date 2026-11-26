@@ -1,8 +1,7 @@
-"""消息解析与文本工具。
+"""Small helpers for parsing command arguments.
 
-OneBot（aiocqhttp）下 ``event.message_str`` 是去掉 CQ 码后的纯文本，
-但会保留唤醒前缀（``/``、``!``、``#`` 等，取决于 AstrBot 配置），
-因此这里统一做前缀剥离和全角空格归一化，避免参数解析错位。
+event.message_str already has CQ codes stripped, but the wake prefix
+(/ ! # ...) is still there depending on the AstrBot config, so we peel it here.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ _WS = re.compile(r"[\s\u3000]+")
 
 
 def normalize(text: str) -> str:
-    """合并连续空白（含全角空格），去掉首尾空白。"""
+    """Collapse runs of whitespace (incl. full-width space) and trim."""
     return _WS.sub(" ", str(text or "")).strip()
 
 
@@ -23,7 +22,7 @@ def strip_prefix(text: str) -> str:
 
 
 def strip_command(text: str, *names: str) -> str:
-    """剥离唤醒前缀和指令名，返回参数部分。"""
+    """Strip the prefix and command name, return the rest."""
     body = strip_prefix(text)
     for name in names:
         if not name:
@@ -34,7 +33,7 @@ def strip_command(text: str, *names: str) -> str:
 
 
 def split_first(text: str) -> tuple[str, str]:
-    """按第一个空白切成 (头, 剩余)。"""
+    """Split on the first space."""
     body = normalize(text)
     if not body:
         return "", ""
@@ -43,7 +42,7 @@ def split_first(text: str) -> tuple[str, str]:
 
 
 def split_fields(text: str) -> list[str]:
-    """按 ``|`` / ``｜`` 切分，用于 游戏|地点|链接 格式。"""
+    """Split on | or ｜, used for "work|place|link"."""
     return [p.strip() for p in re.split(r"[|｜]", normalize(text)) if p.strip()]
 
 
@@ -55,7 +54,7 @@ def parse_int(text: str, default: int) -> int:
 
 
 def chunk_text(text: str, limit: int = 1500) -> list[str]:
-    """按行切分长文本，避免 OneBot 单条消息过长被截断或拒发。"""
+    """Split long text by lines. QQ drops messages that are too long."""
     limit = max(200, int(limit))
     if len(text) <= limit:
         return [text]
@@ -64,7 +63,7 @@ def chunk_text(text: str, limit: int = 1500) -> list[str]:
     buf: list[str] = []
     size = 0
     for line in text.splitlines():
-        # 单行超长时硬切
+        # hard cut when a single line is over the limit
         while len(line) > limit:
             if buf:
                 chunks.append("\n".join(buf))
