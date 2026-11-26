@@ -58,7 +58,7 @@ class GalUniversePlugin(Star):
             source=str(self._cfg("image_source", "auto") or "auto"),
             cache_days=parse_int(self._cfg("image_cache_days", 30), 30),
             api_base=str(self._cfg("image_api_base", "https://api.bgm.tv") or "https://api.bgm.tv"),
-            mirror=str(self._cfg("image_mirror", "https://bgmlain.waterbee.cc") or ""),
+            mirrors=self._image_mirrors(),
         )
         self._lock = asyncio.Lock()
         self._loaded = False
@@ -163,6 +163,19 @@ class GalUniversePlugin(Star):
         fortune = pick_fortune(seed, list(self._cfg("fortune_pool", []) or []))
         advice = pick_advice(seed, list(self._cfg("advice_pool", []) or []))
         return heroine, fortune, advice
+
+    def _image_mirrors(self) -> list[str] | None:
+        """镜像列表：优先读 image_mirrors，兼容旧的 image_mirror 字符串。"""
+        raw = self._cfg("image_mirrors", None)
+        if raw is None:
+            raw = self._cfg("image_mirror", None)
+        if raw is None:
+            return None  # 交给 ImageFetcher 使用内置默认镜像
+        if isinstance(raw, str):
+            return [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
+        if isinstance(raw, list):
+            return [str(x).strip() for x in raw if str(x).strip()]
+        return None
 
     def _link_style(self) -> str:
         style = str(self._cfg("link_style", "domain") or "domain").lower()

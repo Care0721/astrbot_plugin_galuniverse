@@ -20,7 +20,10 @@ from urllib.parse import urlparse
 from .store import norm
 
 BGM_API_BASE = "https://api.bgm.tv"
-BGM_IMAGE_MIRROR = "https://bgmlain.waterbee.cc"
+BGM_IMAGE_MIRRORS = (
+    "https://bgmlain.waterbee.cc",
+    "https://bgm.sakuraspark.fun",
+)
 USER_AGENT = "CareGalUniverse/2.0.1 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_BYTES = 8 * 1024 * 1024
@@ -54,13 +57,13 @@ class ImageFetcher:
         cache_days: int = 30,
         timeout: float = 6.0,
         api_base: str = BGM_API_BASE,
-        mirror: str = BGM_IMAGE_MIRROR,
+        mirrors: list[str] | str | None = None,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.local_dir = Path(local_dir) if local_dir else None
         self.source = source if source in {"auto", "bangumi", "local", "off"} else "auto"
         self.api_base = (api_base or BGM_API_BASE).rstrip("/")
-        self.mirror = (mirror or "").rstrip("/")
+        self.mirrors = self._normalize_mirrors(mirrors)
         self.cache_seconds = max(1, int(cache_days)) * 86400
         self.timeout = max(1.0, float(timeout))
         self._locks: dict[str, asyncio.Lock] = {}
@@ -115,6 +118,34 @@ class ImageFetcher:
             if stem == target or stem.startswith(target + "("):
                 return path
         return None
+
+    # ---------------- 镜像 ----------------
+
+    @staticmethod
+    def _normalize_mirrors(mirrors: list[str] | str | None) -> list[str]:
+        if mirrors is None:
+            return list(BGM_IMAGE_MIRRORS)
+        if isinstance(mirrors, str):
+            raw = mirrors.replace("，", ",").replace("\n", ",").split(",")
+        else:
+            raw = list(mirrors)
+        result: list[str] = []
+        for item in raw:
+            value = str(item).strip().rstrip("/")
+            if value and value not in result:
+                result.append(value)
+        return result
+
+    def mirror_candidates(self, url: str) -> list[str]:
+        """按配置顺序生成候选地址，最后回源官方。"""
+        candidates: list[str] = []
+        for mirror in self.mirrors:
+            candidate = to_mirror(url, mirror)
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+        if url and url not in candidates:
+            candidates.append(url)
+        return candidates
 
     # ---------------- 缓存 ----------------
 
@@ -191,13 +222,8 @@ class ImageFetcher:
         return ""
 
     async def _download(self, session, url: str, name: str) -> Path | None:
-        """先走镜像站，失败再回源，任一成功即落盘。"""
-        candidates = [to_mirror(url, self.mirror), url]
-        seen: set[str] = set()
-        for candidate in candidates:
-            if not candidate or candidate in seen:
-                continue
-            seen.add(candidate)
+        """按镜像顺序依次尝试，最后回源官方，任一成功即落盘。"""
+        for candidate in self.mirror_candidates(url):
             content = await self._read_image(session, candidate)
             if content is None:
                 continue

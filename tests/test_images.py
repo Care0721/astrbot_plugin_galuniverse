@@ -49,16 +49,52 @@ class TestMirror(unittest.TestCase):
     def test_constructor_defaults(self):
         f = ImageFetcher(cache_dir=Path(tempfile.mkdtemp()))
         self.assertEqual(f.api_base, "https://api.bgm.tv")
-        self.assertEqual(f.mirror, self.MIRROR)
+        self.assertEqual(
+            f.mirrors,
+            ["https://bgmlain.waterbee.cc", "https://bgm.sakuraspark.fun"],
+        )
 
-    def test_constructor_custom(self):
+    def test_constructor_custom_list(self):
         f = ImageFetcher(
             cache_dir=Path(tempfile.mkdtemp()),
             api_base="https://api.example.com/",
-            mirror="https://img.example.com/",
+            mirrors=["https://img.example.com/", "https://img2.example.com"],
         )
         self.assertEqual(f.api_base, "https://api.example.com")
-        self.assertEqual(f.mirror, "https://img.example.com")
+        self.assertEqual(
+            f.mirrors, ["https://img.example.com", "https://img2.example.com"]
+        )
+
+    def test_mirrors_from_string(self):
+        f = ImageFetcher(
+            cache_dir=Path(tempfile.mkdtemp()),
+            mirrors=" https://a.com/ ，https://b.com , ,https://a.com",
+        )
+        self.assertEqual(f.mirrors, ["https://a.com", "https://b.com"])
+
+    def test_empty_mirrors_only_official(self):
+        f = ImageFetcher(cache_dir=Path(tempfile.mkdtemp()), mirrors=[])
+        url = "https://lain.bgm.tv/pic/a.jpg"
+        self.assertEqual(f.mirror_candidates(url), [url])
+
+    def test_candidates_order(self):
+        f = ImageFetcher(
+            cache_dir=Path(tempfile.mkdtemp()),
+            mirrors=["https://m1.com", "https://m2.com"],
+        )
+        url = "https://lain.bgm.tv/pic/a.jpg?r=1"
+        self.assertEqual(
+            f.mirror_candidates(url),
+            [
+                "https://m1.com/pic/a.jpg?r=1",
+                "https://m2.com/pic/a.jpg?r=1",
+                "https://lain.bgm.tv/pic/a.jpg?r=1",
+            ],
+        )
+
+    def test_candidates_skip_invalid_url(self):
+        f = ImageFetcher(cache_dir=Path(tempfile.mkdtemp()))
+        self.assertEqual(f.mirror_candidates(""), [])
 
 
 class ImageTestBase(unittest.TestCase):
