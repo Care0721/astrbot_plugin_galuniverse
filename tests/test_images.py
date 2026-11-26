@@ -12,8 +12,53 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.images import ImageFetcher  # noqa: E402
+from core.images import ImageFetcher, to_mirror  # noqa: E402
 from core.store import norm  # noqa: E402
+
+
+class TestMirror(unittest.TestCase):
+    MIRROR = "https://bgmlain.waterbee.cc"
+
+    def test_rewrite_host_keep_path(self):
+        url = "https://lain.bgm.tv/pic/crt/l/00/01/1_crt.jpg"
+        self.assertEqual(
+            to_mirror(url, self.MIRROR),
+            "https://bgmlain.waterbee.cc/pic/crt/l/00/01/1_crt.jpg",
+        )
+
+    def test_query_preserved(self):
+        url = "https://lain.bgm.tv/pic/crt/l/00/01/1_crt.jpg?r=1234"
+        self.assertTrue(to_mirror(url, self.MIRROR).endswith("1_crt.jpg?r=1234"))
+
+    def test_trailing_slash_in_mirror(self):
+        url = "https://lain.bgm.tv/pic/a.jpg"
+        self.assertEqual(
+            to_mirror(url, "https://bgmlain.waterbee.cc/"),
+            "https://bgmlain.waterbee.cc/pic/a.jpg",
+        )
+
+    def test_empty_mirror_keeps_original(self):
+        url = "https://lain.bgm.tv/pic/a.jpg"
+        self.assertEqual(to_mirror(url, ""), url)
+        self.assertEqual(to_mirror(url, "   "), url)
+
+    def test_relative_url_untouched(self):
+        self.assertEqual(to_mirror("/pic/a.jpg", self.MIRROR), "/pic/a.jpg")
+        self.assertEqual(to_mirror("", self.MIRROR), "")
+
+    def test_constructor_defaults(self):
+        f = ImageFetcher(cache_dir=Path(tempfile.mkdtemp()))
+        self.assertEqual(f.api_base, "https://api.bgm.tv")
+        self.assertEqual(f.mirror, self.MIRROR)
+
+    def test_constructor_custom(self):
+        f = ImageFetcher(
+            cache_dir=Path(tempfile.mkdtemp()),
+            api_base="https://api.example.com/",
+            mirror="https://img.example.com/",
+        )
+        self.assertEqual(f.api_base, "https://api.example.com")
+        self.assertEqual(f.mirror, "https://img.example.com")
 
 
 class ImageTestBase(unittest.TestCase):

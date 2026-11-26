@@ -4,7 +4,7 @@
 
 支持 **OneBot v11（aiocqhttp / NapCat / Lagrange）**、QQ 官方机器人、Telegram、Discord、飞书等 AstrBot 已接入的平台。指令输出为纯文本，不依赖 Markdown 渲染。
 
-当前版本：**v2.0.0**
+当前版本：**v2.0.1**
 
 ---
 
@@ -86,6 +86,8 @@
 | `enable_spot_link` | bool | true | 今日老婆附带圣地信息 |
 | `image_source` | string | `auto` | 立绘来源：`auto` / `bangumi` / `local` / `off` |
 | `image_cache_days` | int | 30 | 立绘缓存天数 |
+| `image_api_base` | string | `https://api.bgm.tv` | 角色搜索接口，可换自建反代 |
+| `image_mirror` | string | `https://bgmlain.waterbee.cc` | 图片镜像站，留空直连官方 |
 | `page_size` | int | 6 | 每页条数 |
 | `link_style` | string | `domain` | 链接展示：`domain` / `full` / `hidden` |
 | `max_chars_per_message` | int | 1000 | 单条消息上限，超出自动分段 |
@@ -139,6 +141,7 @@
 1. **本地图片**：`data/plugin_data/astrbot_plugin_universe/images/`
    文件名支持 `古河渚.jpg`、`古河渚 (CLANNAD).png`，扩展名 `.jpg/.jpeg/.png/.webp/.gif`
 2. **Bangumi**：按角色名搜索 `api.bgm.tv`，取 `large/medium` 立绘并缓存到 `image_cache/`
+   图片默认经镜像 `https://bgmlain.waterbee.cc` 拉取（反代 `lain.bgm.tv`，内地更快），镜像失败自动回源官方
 3. 都拿不到：只发文字卡片，不报错
 
 `image_source` 可强制指定来源，或设 `off` 完全关闭。搜索失败会写 miss 标记，24 小时内不再重试，避免拖慢抽签。

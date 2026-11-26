@@ -27,7 +27,7 @@ from .core.parser import chunk_text, normalize, parse_int, split_fields, split_f
 from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 ADMIN_SUBS = {"添加老婆", "添加圣地", "删除老婆", "删除圣地", "重载", "统计", "导入", "备份"}
 
@@ -57,6 +57,8 @@ class GalUniversePlugin(Star):
             local_dir=self.data_dir / "images",
             source=str(self._cfg("image_source", "auto") or "auto"),
             cache_days=parse_int(self._cfg("image_cache_days", 30), 30),
+            api_base=str(self._cfg("image_api_base", "https://api.bgm.tv") or "https://api.bgm.tv"),
+            mirror=str(self._cfg("image_mirror", "https://bgmlain.waterbee.cc") or ""),
         )
         self._lock = asyncio.Lock()
         self._loaded = False

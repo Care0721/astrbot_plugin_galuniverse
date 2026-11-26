@@ -15,14 +15,34 @@ import os
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .store import norm
 
-BGM_SEARCH_URL = "https://api.bgm.tv/v0/search/characters"
-USER_AGENT = "CareGalUniverse/2.0 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
+BGM_API_BASE = "https://api.bgm.tv"
+BGM_IMAGE_MIRROR = "https://bgmlain.waterbee.cc"
+USER_AGENT = "CareGalUniverse/2.0.1 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_BYTES = 8 * 1024 * 1024
 MISS_TTL = 86400
+
+
+def to_mirror(url: str, mirror: str) -> str:
+    """把 lain.bgm.tv 的图片地址改写到镜像站，保留 path 与 query。
+
+    镜像站按原路径反代 ``lain.bgm.tv``，所以只替换 host：
+    ``https://lain.bgm.tv/pic/crt/l/00/01/1_crt.jpg?r=1``
+    → ``https://bgmlain.waterbee.cc/pic/crt/l/00/01/1_crt.jpg?r=1``
+    """
+    url = (url or "").strip()
+    mirror = (mirror or "").strip().rstrip("/")
+    if not url or not mirror:
+        return url
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url
+    suffix = f"?{parsed.query}" if parsed.query else ""
+    return f"{mirror}{parsed.path}{suffix}"
 
 
 class ImageFetcher:
@@ -33,10 +53,14 @@ class ImageFetcher:
         source: str = "auto",
         cache_days: int = 30,
         timeout: float = 6.0,
+        api_base: str = BGM_API_BASE,
+        mirror: str = BGM_IMAGE_MIRROR,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.local_dir = Path(local_dir) if local_dir else None
         self.source = source if source in {"auto", "bangumi", "local", "off"} else "auto"
+        self.api_base = (api_base or BGM_API_BASE).rstrip("/")
+        self.mirror = (mirror or "").rstrip("/")
         self.cache_seconds = max(1, int(cache_days)) * 86400
         self.timeout = max(1.0, float(timeout))
         self._locks: dict[str, asyncio.Lock] = {}
@@ -142,7 +166,7 @@ class ImageFetcher:
     async def _search_image_url(self, session, name: str) -> str:
         payload = {"keyword": name, "filter": {"nsfw": False}}
         async with session.post(
-            f"{BGM_SEARCH_URL}?limit=5", json=payload
+            f"{self.api_base}/v0/search/characters?limit=5", json=payload
         ) as resp:
             if resp.status != 200:
                 return ""
@@ -167,25 +191,43 @@ class ImageFetcher:
         return ""
 
     async def _download(self, session, url: str, name: str) -> Path | None:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                return None
-            content_type = (resp.headers.get("Content-Type") or "").lower()
-            if content_type and not content_type.startswith("image/"):
-                return None
-            content = await resp.read()
+        """先走镜像站，失败再回源，任一成功即落盘。"""
+        candidates = [to_mirror(url, self.mirror), url]
+        seen: set[str] = set()
+        for candidate in candidates:
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            content = await self._read_image(session, candidate)
+            if content is None:
+                continue
+            ext = self._guess_ext(content[1])
+            return self._write_atomic(
+                self.cache_dir / f"{self._cache_prefix(name)}{ext}", content[0]
+            )
+        return None
+
+    async def _read_image(self, session, url: str) -> tuple[bytes, str] | None:
+        try:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return None
+                content_type = (resp.headers.get("Content-Type") or "").lower()
+                if content_type and not content_type.startswith("image/"):
+                    return None
+                content = await resp.read()
+        except Exception:
+            return None
         if not content or len(content) > MAX_BYTES:
             return None
+        return content, content_type
 
-        ext = ".jpg"
-        if "png" in content_type:
-            ext = ".png"
-        elif "webp" in content_type:
-            ext = ".webp"
-        elif "gif" in content_type:
-            ext = ".gif"
-
-        return self._write_atomic(self.cache_dir / f"{self._cache_prefix(name)}{ext}", content)
+    @staticmethod
+    def _guess_ext(content_type: str) -> str:
+        for marker, ext in (("png", ".png"), ("webp", ".webp"), ("gif", ".gif")):
+            if marker in content_type:
+                return ext
+        return ".jpg"
 
     @staticmethod
     def _write_atomic(path: Path, content: bytes) -> Path | None:

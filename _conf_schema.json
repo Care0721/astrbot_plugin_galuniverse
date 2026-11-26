@@ -36,6 +36,18 @@
     "slider": {"min": 1, "max": 365, "step": 1},
     "hint": "过期后重新下载，避免磁盘无限增长"
   },
+  "image_api_base": {
+    "description": "Bangumi API 地址",
+    "type": "string",
+    "default": "https://api.bgm.tv",
+    "hint": "角色搜索接口，可替换为自建反代；留空使用官方地址"
+  },
+  "image_mirror": {
+    "description": "图片镜像站",
+    "type": "string",
+    "default": "https://bgmlain.waterbee.cc",
+    "hint": "反代 lain.bgm.tv，加速内地拉图；留空则直连官方，镜像失败会自动回源"
+  },
   "fortune_scope": {
     "description": "抽签范围",
     "type": "string",
