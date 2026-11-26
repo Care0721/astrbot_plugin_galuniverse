@@ -1,0 +1,95 @@
+{
+  "enable_daily_wife": {
+    "description": "启用「今日老婆」",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后 /今日老婆 与 /换老婆 均不可用"
+  },
+  "enable_pilgrimage": {
+    "description": "启用「圣地巡礼」",
+    "type": "bool",
+    "default": true
+  },
+  "fortune_scope": {
+    "description": "抽签范围",
+    "type": "string",
+    "default": "per_user",
+    "options": ["per_user", "per_group", "global"],
+    "labels": ["每个用户独立", "每个群统一", "全 Bot 统一"],
+    "subtitles": ["同一用户当天结果固定", "同一群当天结果一致", "所有人当天抽到同一角色"]
+  },
+  "fortune_pool": {
+    "description": "签运档位",
+    "type": "list",
+    "default": ["超大吉", "大吉", "中吉", "小吉", "末吉", "平", "凶"],
+    "hint": "按顺序排列，抽签时等概率选取"
+  },
+  "advice_pool": {
+    "description": "今日建议文案",
+    "type": "list",
+    "default": [
+      "今天适合重温一段旧剧情，别忘了存档。",
+      "去听听 OST 吧，情绪会被温柔地接住。",
+      "给喜欢的人发一句晚安，今天就算圆满。"
+    ],
+    "hint": "留空则使用内置默认文案"
+  },
+  "timezone": {
+    "description": "时区",
+    "type": "string",
+    "default": "Asia/Shanghai",
+    "hint": "决定「每天」的分界点，服务器在海外时务必设置"
+  },
+  "reroll_per_day": {
+    "description": "每日重抽次数",
+    "type": "int",
+    "default": 1,
+    "slider": {"min": 0, "max": 10, "step": 1},
+    "hint": "0 表示禁用 /换老婆"
+  },
+  "fuzzy_match": {
+    "description": "圣地模糊匹配",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后输入 CL 也能匹配 CLANNAD"
+  },
+  "page_size": {
+    "description": "每页条数",
+    "type": "int",
+    "default": 6,
+    "slider": {"min": 3, "max": 20, "step": 1}
+  },
+  "link_style": {
+    "description": "圣地链接展示方式",
+    "type": "string",
+    "default": "domain",
+    "options": ["domain", "full", "hidden"],
+    "labels": ["仅域名+首段路径", "完整链接", "不显示"],
+    "subtitles": ["省字符，手机端更整齐", "完整 URL，可复制", "只显示地点名称"]
+  },
+  "max_chars_per_message": {
+    "description": "单条消息最大字数",
+    "type": "int",
+    "default": 1000,
+    "slider": {"min": 500, "max": 4000, "step": 100},
+    "hint": "超长内容自动分段，规避 OneBot 消息长度限制"
+  },
+  "reply_with_at": {
+    "description": "群聊回复时 @ 发送者",
+    "type": "bool",
+    "default": false,
+    "hint": "仅 OneBot(aiocqhttp) 群聊生效，其他平台自动忽略"
+  },
+  "extra_admin_ids": {
+    "description": "额外管理员 ID",
+    "type": "list",
+    "default": [],
+    "hint": "OneBot 私聊中 role 恒为 member，需在此填 QQ 号才能使用管理指令"
+  },
+  "legacy_import": {
+    "description": "自动导入旧版 TXT",
+    "type": "bool",
+    "default": true,
+    "hint": "首次启动时把插件目录下的 wives.txt / spots.txt 导入新数据文件"
+  }
+}

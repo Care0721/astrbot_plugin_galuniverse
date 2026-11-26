@@ -1,6 +1,16 @@
-name: astrbot_plugin_universe # 插件唯一识别名，以 astrbot_plugin_ 前缀开头
-display_name: gal圣地巡礼其他插件 # 用于展示的名字，可以是方便人类阅读的名字（需要版本 >= v4.5.0，低版本不会报错，请放心填写）
-desc: 如果在梦里能相遇的话，那大概就是现实 # 插件简短描述
-version: v1.8.0 # 插件版本号。格式：v1.1.1 或者 v1.1
-author: Care # 作者
-repo: https://github.com/Care0721/astrbot_plugin_galuniverse # 插件的仓库地址
+name: astrbot_plugin_galuniverse
+display_name: GalUniverse Pro
+short_desc: 每日 Gal 运势 + 圣地巡礼查询
+desc: 今日老婆、换老婆、圣地巡礼与作品管理，数据可持久化、指令可热重载
+version: v2.0.0
+author: Care
+repo: https://github.com/Care0721/astrbot_plugin_galuniverse
+astrbot_version: ">=4.10,<5"
+support_platforms:
+  - aiocqhttp
+  - qq_official
+  - qq_official_webhook
+  - telegram
+  - discord
+  - lark
+  - wecom
