@@ -5,4 +5,4 @@
 ``data.plugins.<dir>.main`` 加载方式下稳定可用。
 """
 
-__version__ = "2.0.9"
+__version__ = "2.1.0"

@@ -29,6 +29,9 @@ MAX_HEROINES = 5000
 THIN_POOL = 50
 """名单少于这个数量就认为「数据没迁移成功」，自动补入内置角色。"""
 
+RECENT_KEEP = 20
+"""每个 scope 记住最近多少次抽取，用于避免短时间内反复抽到同一个人。"""
+
 
 @dataclass
 class LoadReport:
@@ -415,6 +418,7 @@ class StateStore:
     def __init__(self, data_dir: Path) -> None:
         self.path = Path(data_dir) / STATE_FILE
         self.data: dict[str, dict] = {}
+        self.history: dict[str, list[dict]] = {}
         self.load()
 
     def load(self) -> None:
@@ -423,21 +427,37 @@ class StateStore:
         try:
             with self.path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            if isinstance(data, dict) and isinstance(data.get("users"), dict):
-                self.data = data["users"]
         except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-            self.data = {}
+            self.data, self.history = {}, {}
+            return
+        if not isinstance(data, dict):
+            return
+        if isinstance(data.get("users"), dict):
+            self.data = data["users"]
+        raw_history = data.get("history")
+        if isinstance(raw_history, dict):
+            self.history = {
+                str(k): [e for e in v if isinstance(e, dict)]
+                for k, v in raw_history.items()
+                if isinstance(v, list)
+            }
 
     def save(self, today: str | None = None) -> None:
         """保存状态；``today`` 传入插件配置时区的当天日期，避免时区错位误删记录。"""
         keep = today or time.strftime("%Y-%m-%d")
         # 只保留当天记录，防止无限膨胀
         self.data = {k: v for k, v in self.data.items() if v.get("date") == keep}
+        # 抽取历史只留最近若干条
+        self.history = {
+            k: v[-RECENT_KEEP:] for k, v in self.history.items() if v
+        }
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), prefix=".state-", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"users": self.data}, f, ensure_ascii=False)
+                json.dump(
+                    {"users": self.data, "history": self.history}, f, ensure_ascii=False
+                )
             os.replace(tmp, self.path)
         except BaseException:
             try:
@@ -455,3 +475,22 @@ class StateStore:
         self.data[key] = {"date": today, "reroll": used}
         self.save(today)
         return used
+
+    # ---------------- 抽取历史 ----------------
+
+    def recent_names(self, scope: str, exclude_date: str = "") -> set[str]:
+        """返回该 scope 最近抽过的角色名（可排除某一天，避免「自己撞自己」）。"""
+        entries = self.history.get(scope) or []
+        return {
+            str(e.get("name"))
+            for e in entries
+            if e.get("name") and str(e.get("date") or "") != exclude_date
+        }
+
+    def remember(self, scope: str, date: str, name: str) -> None:
+        if not name:
+            return
+        entries = self.history.setdefault(scope, [])
+        entries.append({"date": date, "name": name})
+        self.history[scope] = entries[-RECENT_KEEP:]
+        self.save(date)

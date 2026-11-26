@@ -2,7 +2,7 @@ name: astrbot_plugin_universe
 display_name: GalUniverse Pro
 short_desc: 每日 Gal 运势 + 圣地巡礼查询
 desc: 今日老婆、换老婆、圣地巡礼与作品管理，数据可持久化、指令可热重载
-version: v2.0.9
+version: v2.1.0
 author: Care
 repo: https://github.com/Care0721/astrbot_plugin_galuniverse
 astrbot_version: ">=4.10,<5"

@@ -33,13 +33,13 @@ from .core.parser import chunk_text, normalize, parse_int, split_fields, split_f
 from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
-VERSION = "2.0.9"
+VERSION = "2.1.0"
 
 MARKDOWN_PLATFORMS = {"qq_official", "qq_official_webhook"}
 """原生支持 Markdown 的平台。QQ 官方机器人群聊/单聊已全量开放。"""
 
-MAX_IMAGE_TRIES = 3
-"""抽到没有立绘的角色时，最多换几位再试。"""
+MAX_CANDIDATES = 6
+"""一次抽取最多尝试几个候选（用于避开「最近抽过」和「没有立绘」的人）。"""
 
 LEGACY_PLUGIN_NAMES = ("astrbot_plugin_galuniverse",)
 """历史版本用过的插件名。数据目录跟着插件名走，改名后需要做一次补录。"""
@@ -251,11 +251,18 @@ class GalUniversePlugin(Star):
             return parse_int(self._cfg("bangumi_ratio", 50), 50) > 0
         return False
 
-    async def _pick_candidate(self, seed: str) -> tuple[Heroine | None, str]:
-        """按 seed 抽一位：镜像池优先，失败回落本地名单。"""
-        heroine, image_url = await self._pick_from_mirror(seed)
-        if heroine is not None:
-            return heroine, image_url
+    async def _pick_candidate(
+        self, seed: str, allow_mirror: bool = True
+    ) -> tuple[Heroine | None, str]:
+        """按 seed 抽一位：镜像池优先，失败回落本地名单。
+
+        ``allow_mirror=False`` 时只查本地名单 —— 重试换人时用它，
+        避免一次指令连打好几次 Bangumi 接口。
+        """
+        if allow_mirror:
+            heroine, image_url = await self._pick_from_mirror(seed)
+            if heroine is not None:
+                return heroine, image_url
         heroines = self.store.heroines
         if not heroines:
             return None, ""
@@ -266,28 +273,39 @@ class GalUniversePlugin(Star):
     ) -> tuple[Heroine | None, str, str, str, Path | None]:
         """抽今日老婆，返回 (角色, 签运, 建议, 立绘地址, 本地立绘路径)。
 
-        关键行为：**拿不到立绘就换一位**。
-        抽签本身是确定性的，所以候选序列 = seed、seed#1、seed#2… 也是确定性的，
-        同一天多次触发会稳定落在同一个「有图」的角色上。
+        候选序列 ``seed / seed#1 / seed#2 …`` 是确定性的，所以同一天多次触发结果一致；
+        在这条序列上依次跳过「最近几天已经抽过的人」和「拿不到立绘的人」。
         """
         base_seed = daily_seed(scope_key, date_key, reroll)
         fortune = pick_fortune(base_seed, list(self._cfg("fortune_pool", []) or []))
         advice = pick_advice(base_seed, self._advice_pool())
 
-        want_image = str(self._cfg("image_source", "auto") or "auto") != "off"
-        tries = MAX_IMAGE_TRIES if want_image else 1
+        want_image = self._images_enabled()
+        # 前几天抽过的人：尽量避开，这是「老是那几个人」的根治手段
+        avoid = self.state.recent_names(scope_key, exclude_date=date_key)
+        tries = MAX_CANDIDATES if want_image or avoid else 1
         fallback: tuple[Heroine, str] | None = None
 
         for attempt in range(tries):
             seed = base_seed if attempt == 0 else f"{base_seed}#{attempt}"
-            heroine, image_url = await self._pick_candidate(seed)
+            # 只有第一个候选走镜像池，后续换人只在本地名单里挑，保证响应速度
+            heroine, image_url = await self._pick_candidate(
+                seed, allow_mirror=(attempt == 0)
+            )
             if heroine is None:
                 continue
+
+            # 最近抽过就换下一位（留最后一次机会，避免全被避让掉时抽不出来）
+            if heroine.name in avoid and attempt < tries - 1:
+                continue
+
             if not want_image:
+                self.state.remember(scope_key, date_key, heroine.name)
                 return heroine, fortune, advice, image_url, None
 
             path = await self._image_path(heroine, image_url)
             if path is not None:
+                self.state.remember(scope_key, date_key, heroine.name)
                 return heroine, fortune, advice, image_url, path
             logger.info(
                 f"[GalUniverse] 「{heroine.name}」立绘拉取失败"
@@ -298,6 +316,7 @@ class GalUniversePlugin(Star):
 
         if fallback is None:
             return None, fortune, advice, "", None
+        self.state.remember(scope_key, date_key, fallback[0].name)
         return fallback[0], fortune, advice, fallback[1], None
 
     async def _pick_from_mirror(self, seed: str) -> tuple[Heroine | None, str]:
@@ -317,10 +336,13 @@ class GalUniversePlugin(Star):
         # 只试一部作品：失败会写 1 小时负缓存，下一天自然换一部，避免指令被网络拖慢
         work = works[pick_index(f"{seed}|work", len(works))]
         try:
-            return await self.pool.draw(work, f"{seed}|{work}")
+            got = await self.pool.draw(work, f"{seed}|{work}")
         except Exception as exc:
             logger.warning(f"[GalUniverse] 镜像角色池异常：{exc}")
             return None, ""
+        # pool.draw 拿不到角色时返回 None，这里必须归一成二元组，
+        # 否则调用方解包会抛 TypeError（之前「今日老婆」偶发报错就是这个）
+        return got if got else (None, "")
 
     async def _image_path(self, heroine: Heroine, image_url: str = "") -> Path | None:
         """拉取角色立绘到本地；任何失败都返回 None，不影响文字卡片。"""

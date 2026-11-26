@@ -38,6 +38,9 @@ FAIL_TTL = 3600
 MAX_ITEMS = 40
 """单个作品最多缓存多少个角色，控制文件体积。"""
 
+MIN_POOL = 6
+"""作品可用角色少于这个数就不用它抽 —— 否则每次都抽到同一两个人。"""
+
 
 def _digest(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
@@ -132,7 +135,8 @@ class BangumiPool:
             )
 
         items = await self._characters(work)
-        if not items:
+        if len(items) < MIN_POOL:
+            # 角色太少的作品直接弃用，避免「一抽就是那一个」
             return None
 
         chosen = items[pick_index(seed, len(items))]
@@ -198,7 +202,7 @@ class BangumiPool:
             return []
 
         headers = {
-            "User-Agent": "CareGalUniverse/2.0.9 (+https://github.com/Care0721/astrbot_plugin_galuniverse)",
+            "User-Agent": "CareGalUniverse/2.1.0 (+https://github.com/Care0721/astrbot_plugin_galuniverse)",
             "Content-Type": "application/json",
         }
         timeout = aiohttp.ClientTimeout(total=self.timeout)

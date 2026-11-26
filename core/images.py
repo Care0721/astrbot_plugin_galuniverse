@@ -33,7 +33,7 @@ BGM_IMAGE_MIRRORS = (
 )
 """图片镜像：按顺序尝试，全部失败后回源官方。"""
 
-USER_AGENT = "CareGalUniverse/2.0.9 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
+USER_AGENT = "CareGalUniverse/2.1.0 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_BYTES = 8 * 1024 * 1024
 MISS_TTL = 1800
