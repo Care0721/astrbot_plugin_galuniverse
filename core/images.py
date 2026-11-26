@@ -33,10 +33,10 @@ BGM_IMAGE_MIRRORS = (
 )
 """图片镜像：按顺序尝试，全部失败后回源官方。"""
 
-USER_AGENT = "CareGalUniverse/2.0.7 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
+USER_AGENT = "CareGalUniverse/2.0.8 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_BYTES = 8 * 1024 * 1024
-MISS_TTL = 86400
+MISS_TTL = 1800
 
 
 def to_mirror(url: str, mirror: str) -> str:
@@ -80,13 +80,16 @@ class ImageFetcher:
         self._urls: dict[str, str] = {}
         self._load_urls()
         self._locks: dict[str, asyncio.Lock] = {}
+        self.last_reason = ""
+        """最近一次失败的原因，供上层打日志排查用。"""
 
     # ---------------- 对外入口 ----------------
 
     async def fetch(self, name: str, work: str = "", image_url: str = "") -> Path | None:
-        """取立绘：本地 → 缓存 → miss → 在线下载。
+        """取立绘：本地 → 缓存 → 已知地址直下 → 在线搜索下载。
 
         ``image_url`` 由 Bangumi 角色池直接给出时跳过搜索，少打一次接口。
+        失败会写 30 分钟的 miss 标记（不要太长，网络抖动一次不该封一整天）。
         """
         if self.source == "off" or not name.strip():
             return None
@@ -95,12 +98,14 @@ class ImageFetcher:
         if local:
             return local
         if self.source == "local":
+            self.last_reason = "仅本地模式，且 images/ 里没有同名图片"
             return None
 
         cached = self._find_cached(name)
         if cached:
             return cached
         if self._is_miss(name):
+            self.last_reason = "miss 标记（30 分钟内失败过，跳过重试）"
             return None
 
         lock = self._locks.setdefault(name, asyncio.Lock())
@@ -108,14 +113,27 @@ class ImageFetcher:
             cached = self._find_cached(name)
             if cached:
                 return cached
-            if image_url:
-                path = await self._download_direct(name, image_url)
+
+            # 之前 resolve_url 拿过地址就直接用，省一次搜索
+            known = image_url or self._urls.get(self._cache_prefix(name), "")
+            if known:
+                path = await self._download_direct(name, known)
                 if path:
+                    self._clear_miss(name)
                     return path
+
             path = await self._download_from_bangumi(name)
             if path is None:
                 self._mark_miss(name)
+            else:
+                self._clear_miss(name)
             return path
+
+    def _clear_miss(self, name: str) -> None:
+        try:
+            self._miss_path(name).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     async def _download_direct(self, name: str, image_url: str) -> Path | None:
         try:
@@ -306,6 +324,7 @@ class ImageFetcher:
         try:
             import aiohttp
         except ImportError:
+            self.last_reason = "缺少 aiohttp"
             return None
 
         timeout = aiohttp.ClientTimeout(total=self.timeout)
@@ -313,31 +332,36 @@ class ImageFetcher:
         try:
             async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
                 for base in self.api_candidates():
-                    image_url = await self._search_image_url(session, base, name)
-                    if not image_url:
+                    urls = await self._search_image_urls(session, base, name)
+                    if not urls:
                         continue
-                    path = await self._download(session, image_url, name)
+                    path = await self._download(session, urls, name)
                     if path:
                         return path
-        except Exception:
+        except Exception as exc:
+            self.last_reason = f"请求异常：{exc}"
             return None
         return None
 
-    async def _search_image_url(self, session, base: str, name: str) -> str:
+    async def _search_image_urls(self, session, base: str, name: str) -> list[str]:
+        """按角色名搜索，返回**多个尺寸**的图片地址（大的优先，小的兜底）。"""
         payload = {"keyword": name, "filter": {"nsfw": False}}
         try:
             async with session.post(
                 f"{base.rstrip('/')}/v0/search/characters?limit=5", json=payload
             ) as resp:
                 if resp.status != 200:
-                    return ""
+                    self.last_reason = f"搜索接口 {base} 返回 {resp.status}"
+                    return []
                 data = await resp.json(content_type=None)
-        except Exception:
-            return ""
+        except Exception as exc:
+            self.last_reason = f"搜索接口 {base} 异常：{exc}"
+            return []
 
         items = data.get("data") if isinstance(data, dict) else data
         if not isinstance(items, list) or not items:
-            return ""
+            self.last_reason = f"搜索接口 {base} 无结果"
+            return []
 
         target = norm(name)
         chosen = next(
@@ -345,33 +369,54 @@ class ImageFetcher:
             items[0] if isinstance(items[0], dict) else None,
         )
         if not chosen:
-            return ""
+            self.last_reason = "搜索结果里没有可用条目"
+            return []
         images = chosen.get("images") or {}
+        urls: list[str] = []
         for key in ("large", "medium", "small", "grid"):
             url = images.get(key)
-            if isinstance(url, str) and url.startswith("http"):
-                return url
-        return ""
+            if isinstance(url, str) and url.startswith("http") and url not in urls:
+                urls.append(url)
+        if not urls:
+            self.last_reason = "角色没有立绘字段"
+        return urls
 
-    async def _download(self, session, url: str, name: str) -> Path | None:
-        """按镜像顺序依次尝试，最后回源官方，任一成功即落盘。"""
-        for candidate in self.mirror_candidates(url):
+    async def _search_image_url(self, session, base: str, name: str) -> str:
+        """兼容旧调用：只返回首个地址。"""
+        urls = await self._search_image_urls(session, base, name)
+        return urls[0] if urls else ""
+
+    async def _download(self, session, urls: list[str] | str, name: str) -> Path | None:
+        """逐个尺寸 × 逐个镜像尝试，任一成功即落盘。"""
+        candidates: list[str] = []
+        for url in [urls] if isinstance(urls, str) else urls:
+            for candidate in self.mirror_candidates(url):
+                if candidate not in candidates:
+                    candidates.append(candidate)
+
+        for candidate in candidates:
             content = await self._read_image(session, candidate)
             if content is None:
                 continue
             ext = self._guess_ext(content[1])
-            return self._write_atomic(
+            path = self._write_atomic(
                 self.cache_dir / f"{self._cache_prefix(name)}{ext}", content[0]
             )
+            if path:
+                return path
+        if not self.last_reason:
+            self.last_reason = "所有镜像都下载失败"
         return None
 
     async def _read_image(self, session, url: str) -> tuple[bytes, str] | None:
         try:
             async with session.get(url) as resp:
                 if resp.status != 200:
+                    self.last_reason = f"图片返回 {resp.status}（{url[:60]}…）"
                     return None
                 content_type = (resp.headers.get("Content-Type") or "").lower()
                 if content_type and not content_type.startswith("image/"):
+                    self.last_reason = f"返回的不是图片（{content_type}）"
                     return None
                 content = await resp.read()
         except Exception:

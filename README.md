@@ -4,7 +4,7 @@
 
 支持 **OneBot v11（aiocqhttp / NapCat / Lagrange）**、QQ 官方机器人、Telegram、Discord、飞书等 AstrBot 已接入的平台。指令输出为纯文本，不依赖 Markdown 渲染。
 
-当前版本：**v2.0.7**
+当前版本：**v2.0.8**
 
 ---
 
@@ -214,6 +214,10 @@ QQ 官方适配器会把同一事件内的返回合并进一个发送缓冲，�
 
 抽签结果会写进 `image_cache/bgm_pool.json`，同一天重复触发不会变、断网也能复现。
 
+**没图就换一位**：抽到的角色如果立绘拉不下来，会自动换下一位候选（`seed#1`、`seed#2`，最多 3 位），
+直到拿到一张能用的图；三位都不行就只发一条「这次没拉到立绘」的提示，不会发一张没图的卡。
+候选序列本身也是确定性的，所以同一天多次触发仍然稳定。
+
 **立绘优先级**：
 
 1. **本地图片**：`data/plugin_data/astrbot_plugin_universe/images/`
@@ -307,7 +311,7 @@ core/parser.py        # 参数解析、长消息分段
 core/render.py        # 纯文本渲染
 core/theme.py         # 视觉常量（分隔线、签运、链接）
 assets/               # 内置初始数据
-tests/                # 单测（114 项）
+tests/                # 单测（122 项）
 ```
 
 ---

@@ -246,6 +246,15 @@ def usage(text: str) -> str:
     return card("📎 参数不对", [], [f"💡 {text}"])
 
 
+def no_image() -> str:
+    """一张立绘都拉不到时用它代替整张卡 —— 宁可少发一条，也不发没图的卡。"""
+    return card(
+        "🖼️ 这次没拉到立绘",
+        [],
+        ["再发一次 /今日老婆 试试"],
+    )
+
+
 def error_card() -> str:
     return card("💥 出了点小问题", [], ["💡 请稍后再试，或让管理员查看日志"])
 

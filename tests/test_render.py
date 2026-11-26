@@ -289,6 +289,12 @@ class TestOtherCards(unittest.TestCase):
         text = render.not_found("xx", [])
         self.assertIn("💡 发送 /圣地列表 查看全部作品", text)
 
+    def test_no_image_card(self):
+        text = render.no_image()
+        self.assertIn("这次没拉到立绘", text)
+        self.assertIn("/今日老婆", text)
+        self.assertNotIn("\n\n", text)
+
     def test_tip_cards_have_no_empty_lines(self):
         for text in (
             render.empty_heroines(),

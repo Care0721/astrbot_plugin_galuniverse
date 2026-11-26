@@ -28,10 +28,13 @@ from .core.parser import chunk_text, normalize, parse_int, split_fields, split_f
 from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
-VERSION = "2.0.7"
+VERSION = "2.0.8"
 
 MARKDOWN_PLATFORMS = {"qq_official", "qq_official_webhook"}
 """原生支持 Markdown 的平台。QQ 官方机器人群聊/单聊已全量开放。"""
+
+MAX_IMAGE_TRIES = 3
+"""抽到没有立绘的角色时，最多换几位再试。"""
 
 LEGACY_PLUGIN_NAMES = ("astrbot_plugin_galuniverse",)
 """历史版本用过的插件名。数据目录跟着插件名走，改名后需要做一次补录。"""
@@ -234,6 +237,9 @@ class GalUniversePlugin(Star):
             return f"g:{event.get_platform_id()}:{gid}"
         return f"u:{event.get_platform_id()}:{self._sender_id(event)}"
 
+    def _images_enabled(self) -> bool:
+        return str(self._cfg("image_source", "auto") or "auto") != "off"
+
     def _mirror_pool_enabled(self) -> bool:
         mode = str(self._cfg("pool_source", "hybrid") or "hybrid").strip().lower()
         if mode == "bangumi":
@@ -242,26 +248,54 @@ class GalUniversePlugin(Star):
             return parse_int(self._cfg("bangumi_ratio", 50), 50) > 0
         return False
 
-    async def _pick_heroine(
-        self, scope_key: str, date_key: str, reroll: int = 0
-    ) -> tuple[Heroine | None, str, str, str]:
-        """抽一位老婆，返回 (角色, 签运, 建议, 立绘地址)。
-
-        抽取顺序：配置允许时先走 Bangumi 镜像角色池，失败或未命中再回落本地名单。
-        整个过程对同一个 seed 完全确定，所以同一天多次触发结果一致。
-        """
-        seed = daily_seed(scope_key, date_key, reroll)
-        fortune = pick_fortune(seed, list(self._cfg("fortune_pool", []) or []))
-        advice = pick_advice(seed, self._advice_pool())
-
+    async def _pick_candidate(self, seed: str) -> tuple[Heroine | None, str]:
+        """按 seed 抽一位：镜像池优先，失败回落本地名单。"""
         heroine, image_url = await self._pick_from_mirror(seed)
         if heroine is not None:
-            return heroine, fortune, advice, image_url
-
+            return heroine, image_url
         heroines = self.store.heroines
         if not heroines:
-            return None, fortune, advice, ""
-        return heroines[pick_index(seed, len(heroines))], fortune, advice, ""
+            return None, ""
+        return heroines[pick_index(seed, len(heroines))], ""
+
+    async def _draw_daily(
+        self, scope_key: str, date_key: str, reroll: int = 0
+    ) -> tuple[Heroine | None, str, str, str, Path | None]:
+        """抽今日老婆，返回 (角色, 签运, 建议, 立绘地址, 本地立绘路径)。
+
+        关键行为：**拿不到立绘就换一位**。
+        抽签本身是确定性的，所以候选序列 = seed、seed#1、seed#2… 也是确定性的，
+        同一天多次触发会稳定落在同一个「有图」的角色上。
+        """
+        base_seed = daily_seed(scope_key, date_key, reroll)
+        fortune = pick_fortune(base_seed, list(self._cfg("fortune_pool", []) or []))
+        advice = pick_advice(base_seed, self._advice_pool())
+
+        want_image = str(self._cfg("image_source", "auto") or "auto") != "off"
+        tries = MAX_IMAGE_TRIES if want_image else 1
+        fallback: tuple[Heroine, str] | None = None
+
+        for attempt in range(tries):
+            seed = base_seed if attempt == 0 else f"{base_seed}#{attempt}"
+            heroine, image_url = await self._pick_candidate(seed)
+            if heroine is None:
+                continue
+            if not want_image:
+                return heroine, fortune, advice, image_url, None
+
+            path = await self._image_path(heroine, image_url)
+            if path is not None:
+                return heroine, fortune, advice, image_url, path
+            logger.info(
+                f"[GalUniverse] 「{heroine.name}」立绘拉取失败"
+                f"（{self.images.last_reason or '未知原因'}），换一位再试"
+            )
+            if fallback is None:
+                fallback = (heroine, image_url)
+
+        if fallback is None:
+            return None, fortune, advice, "", None
+        return fallback[0], fortune, advice, fallback[1], None
 
     async def _pick_from_mirror(self, seed: str) -> tuple[Heroine | None, str]:
         """从 Bangumi 镜像角色池抽一位；不启用或失败时返回 (None, "")。"""
@@ -287,24 +321,13 @@ class GalUniversePlugin(Star):
 
     async def _image_path(self, heroine: Heroine, image_url: str = "") -> Path | None:
         """拉取角色立绘到本地；任何失败都返回 None，不影响文字卡片。"""
-        if str(self._cfg("image_source", "auto")) == "off":
+        if not self._images_enabled():
             return None
         try:
-            path = await self.images.fetch(heroine.name, heroine.work, image_url=image_url)
+            return await self.images.fetch(heroine.name, heroine.work, image_url=image_url)
         except Exception as exc:
-            logger.warning(f"[GalUniverse] 立绘获取失败：{exc}")
+            self.images.last_reason = f"异常：{exc}"
             return None
-        if path:
-            return path
-        # 每个角色只提示一次，避免刷屏，同时方便排查网络问题
-        if heroine.name not in self._image_warned and len(self._image_warned) < 200:
-            self._image_warned.add(heroine.name)
-            bases = "、".join(self.images.api_candidates())
-            logger.info(
-                f"[GalUniverse] 未取到「{heroine.name}」的立绘"
-                f"（来源={self._cfg('image_source', 'auto')}，接口={bases}）"
-            )
-        return None
 
     async def _markdown_image_url(self, path: Path | None, fallback: str) -> str:
         """Markdown 内嵌图用哪个地址。
@@ -331,6 +354,7 @@ class GalUniversePlugin(Star):
         date_key: str,
         reroll: int = 0,
         image_url: str = "",
+        path: Path | None = None,
     ):
         """今日老婆：整张卡片 + 立绘**只发一条消息**。
 
@@ -348,20 +372,14 @@ class GalUniversePlugin(Star):
             "spot_total": total,
             "link_style": self._link_style(),
         }
-        source = str(self._cfg("image_source", "auto") or "auto")
         single = bool(self._cfg("single_message", True))
         mode = str(self._cfg("render_mode", "auto") or "auto").strip().lower()
-
-        # 先把立绘拿到本地（缓存命中时是瞬间的）
-        path: Path | None = None
-        if source != "off":
-            path = await self._image_path(heroine, image_url)
 
         if self._markdown_enabled(event) and mode in {"auto", "markdown"}:
             if mode == "markdown":
                 # 强制 Markdown：优先文件服务，其次镜像外链
                 public = await self._markdown_image_url(path, image_url)
-                if not public and path is None and source in {"auto", "bangumi"}:
+                if not public and path is None:
                     public = await self.images.resolve_url(
                         heroine.name, heroine.work, image_url
                     )
@@ -474,13 +492,20 @@ class GalUniversePlugin(Star):
 
             date_key = today_key(self._tz())
             scope_key = self._scope_key(event)
-            heroine, fortune, advice, image_url = await self._pick_heroine(scope_key, date_key)
+            heroine, fortune, advice, image_url, path = await self._draw_daily(
+                scope_key, date_key
+            )
             if heroine is None:
                 async for msg in self._reply(event, render.empty_heroines()):
                     yield msg
                 return
+            if path is None and self._images_enabled():
+                # 一张图都拉不下来：不发干巴巴的卡片，直接提示重试
+                async for msg in self._reply(event, render.no_image()):
+                    yield msg
+                return
             async for msg in self._emit_daily(
-                event, heroine, fortune, advice, date_key, image_url=image_url
+                event, heroine, fortune, advice, date_key, image_url=image_url, path=path
             ):
                 yield msg
         except Exception as exc:
@@ -514,15 +539,26 @@ class GalUniversePlugin(Star):
                 return
 
             used = self.state.mark_reroll(state_key, date_key)
-            heroine, fortune, advice, image_url = await self._pick_heroine(
+            heroine, fortune, advice, image_url, path = await self._draw_daily(
                 scope_key, date_key, used
             )
             if heroine is None:
                 async for msg in self._reply(event, render.empty_heroines()):
                     yield msg
                 return
+            if path is None and self._images_enabled():
+                async for msg in self._reply(event, render.no_image()):
+                    yield msg
+                return
             async for msg in self._emit_daily(
-                event, heroine, fortune, advice, date_key, reroll=used, image_url=image_url
+                event,
+                heroine,
+                fortune,
+                advice,
+                date_key,
+                reroll=used,
+                image_url=image_url,
+                path=path,
             ):
                 yield msg
         except Exception as exc:

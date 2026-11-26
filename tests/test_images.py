@@ -228,5 +228,113 @@ class TestCache(ImageTestBase):
         self.assertEqual(path.read_bytes(), b"123")
 
 
+class _Resp:
+    def __init__(self, status: int, body: bytes = b"", ctype: str = "image/jpeg") -> None:
+        self.status = status
+        self._body = body
+        self.headers = {"Content-Type": ctype}
+
+    async def read(self) -> bytes:
+        return self._body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _Session:
+    """只对 ok_url 返回图片，其余 404。"""
+
+    def __init__(self, ok_url: str) -> None:
+        self.ok_url = ok_url
+        self.hits: list[str] = []
+
+    def get(self, url: str):
+        self.hits.append(url)
+        if url == self.ok_url:
+            return _Resp(200, b"\xff\xd8fakejpeg")
+        return _Resp(404)
+
+
+class TestDownloadFallback(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cache = Path(self.tmp.name)
+        self.fetcher = ImageFetcher(
+            cache_dir=self.cache, mirrors=["https://m1.example.com"]
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_falls_through_to_second_size(self):
+        big = "https://lain.bgm.tv/pic/big.jpg"
+        small = "https://lain.bgm.tv/pic/small.jpg"
+        session = _Session(ok_url=small)
+        path = asyncio.run(self.fetcher._download(session, [big, small], "古河渚"))
+        self.assertIsNotNone(path)
+        self.assertIn(big, session.hits)
+        self.assertIn(small, session.hits)
+
+    def test_tries_mirror_before_origin(self):
+        url = "https://lain.bgm.tv/pic/a.jpg"
+        session = _Session(ok_url=url)
+        asyncio.run(self.fetcher._download(session, [url], "古河渚"))
+        self.assertEqual(session.hits[0], "https://m1.example.com/pic/a.jpg")
+        self.assertEqual(session.hits[-1], url)
+
+    def test_all_fail_sets_reason(self):
+        session = _Session(ok_url="https://never.example.com/x.jpg")
+        path = asyncio.run(
+            self.fetcher._download(session, ["https://lain.bgm.tv/pic/a.jpg"], "古河渚")
+        )
+        self.assertIsNone(path)
+        self.assertTrue(self.fetcher.last_reason)
+
+    def test_string_url_still_supported(self):
+        url = "https://lain.bgm.tv/pic/a.jpg"
+        session = _Session(ok_url=url)
+        self.assertIsNotNone(
+            asyncio.run(self.fetcher._download(session, url, "古河渚"))
+        )
+
+
+class TestMissMarker(ImageTestBase):
+    def test_miss_expires_quickly(self):
+        from core.images import MISS_TTL
+
+        self.assertLessEqual(MISS_TTL, 3600)
+
+    def test_success_clears_miss(self):
+        f = self.fetcher("bangumi")
+        f._mark_miss("古河渚")
+        self.assertTrue(f._is_miss("古河渚"))
+        f._clear_miss("古河渚")
+        self.assertFalse(f._is_miss("古河渚"))
+
+    def test_known_url_skips_search(self):
+        f = self.fetcher("bangumi")
+        key = f._cache_prefix("古河渚")
+        f._urls[key] = "https://img.example.com/a.jpg"
+
+        calls: list[str] = []
+        hit = self.cache / "hit.jpg"
+        hit.write_bytes(b"img")
+
+        async def fake_direct(name: str, url: str):
+            calls.append(url)
+            return hit
+
+        async def boom(name: str):
+            raise AssertionError("已知地址成功时不应再走搜索")
+
+        f._download_direct = fake_direct  # type: ignore[assignment]
+        f._download_from_bangumi = boom  # type: ignore[assignment]
+        self.assertEqual(asyncio.run(f.fetch("古河渚")), hit)
+        self.assertEqual(calls, ["https://img.example.com/a.jpg"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
