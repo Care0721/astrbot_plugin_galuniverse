@@ -69,7 +69,7 @@
 
 ## 配置项
 
-配置在 WebUI 插件详情页可视化编辑，落盘于 `data/config/astrbot_plugin_galuniverse_config.json`。
+配置在 WebUI 插件详情页可视化编辑，落盘于 `data/config/astrbot_plugin_universe_config.json`。
 
 | 配置 | 类型 | 默认 | 说明 |
 |---|---|---|---|
@@ -134,7 +134,7 @@
 ## 数据存储
 
 ```
-data/plugin_data/astrbot_plugin_galuniverse/
+data/plugin_data/astrbot_plugin_universe/
 ├── gal.json     # 角色与圣地数据（原子写入）
 └── state.json   # 每日重抽计数（按天自动清理）
 ```

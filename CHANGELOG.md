@@ -8,7 +8,7 @@
 - **配置不生效**：`context.get_config()` 取的是全局配置，改为注入 `AstrBotConfig`；新增 `_conf_schema.json`，WebUI 配置面板可正常编辑。
 - **圣地数据丢失**：旧版以作品名为字典键，同作品多地点互相覆盖（99 行只剩 52 条）。改为列表存储，68 条全部保留。
 - **含空格参数被截断**：`古河渚 (CLANNAD)`、`Summer Pockets` 现在可完整解析。
-- **数据随插件更新丢失**：迁移到 `data/plugin_data/astrbot_plugin_galuniverse/`。
+- **数据随插件更新丢失**：迁移到 `data/plugin_data/astrbot_plugin_universe/`。
 - **女主重复**：376 行去重为 310 条，抽签概率不再被重复项污染。
 - **插件身份不一致**：`@register` 名称与仓库名、`metadata.yaml` 统一为 `astrbot_plugin_galuniverse`。
 

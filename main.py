@@ -25,7 +25,7 @@ from .core.models import Heroine
 from .core.parser import chunk_text, normalize, parse_int, split_fields, split_first, strip_command
 from .core.store import GalStore, StateStore
 
-PLUGIN_NAME = "astrbot_plugin_galuniverse"
+PLUGIN_NAME = "astrbot_plugin_universe"
 VERSION = "2.0.0"
 
 ADMIN_SUBS = {"添加老婆", "添加圣地", "删除老婆", "删除圣地", "重载", "统计", "导入", "备份"}
