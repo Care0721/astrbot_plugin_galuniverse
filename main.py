@@ -62,6 +62,7 @@ class GalUniversePlugin(Star):
         )
         self._lock = asyncio.Lock()
         self._loaded = False
+        self._image_warned: set[str] = set()
 
     # ---------------- 生命周期 ----------------
 
@@ -193,6 +194,13 @@ class GalUniversePlugin(Star):
             logger.warning(f"[GalUniverse] 立绘获取失败：{exc}")
             return
         if not path:
+            # 每个角色只提示一次，避免刷屏，同时方便排查网络问题
+            if heroine.name not in self._image_warned and len(self._image_warned) < 200:
+                self._image_warned.add(heroine.name)
+                logger.info(
+                    f"[GalUniverse] 未取到「{heroine.name}」的立绘"
+                    f"（来源={self._cfg('image_source', 'auto')}，可检查 api.bgm.tv 连通性）"
+                )
             return
         try:
             yield event.image_result(str(path))
