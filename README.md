@@ -4,7 +4,7 @@
 
 支持 **OneBot v11（aiocqhttp / NapCat / Lagrange）**、QQ 官方机器人、Telegram、Discord、飞书等 AstrBot 已接入的平台。指令输出为纯文本，不依赖 Markdown 渲染。
 
-当前版本：**v2.0.5**
+当前版本：**v2.0.6**
 
 ---
 
@@ -121,12 +121,12 @@ OneBot / Telegram / Discord 等平台走纯文本卡片（图片按消息链顺�
 ```
 🌙 今日老婆
 ━━━━━━━━━━━━
-古河渚 · CLANNAD
+【古河渚 · CLANNAD】
 [立绘图片]
 ✨ 大吉 ▰▰▰▰▰▰▱
 记得存档。
 📍 东京都瑞穗町长冈(古河面包店)
-https://zh.moegirl.org.cn/CLANNAD/圣地巡礼
+🔗 https://zh.moegirl.org.cn/CLANNAD/圣地巡礼
 ━━━━━━━━━━━━
 2026-11-26 · 换一位发 /换老婆
 ```
@@ -135,15 +135,17 @@ QQ 官方机器人走 Markdown（`![](公网地址)` 内嵌图片，图片同样
 
 ```markdown
 ## 🌙 今日老婆
-**古河渚** · CLANNAD
-![古河渚](https://bgmimg.sakuraspark.fun/pic/crt/l/....jpg)
+# 古河渚 · CLANNAD
+![古河渚 #240px #320px](https://bgmimg.sakuraspark.fun/pic/crt/l/....jpg)
 ✨ **大吉** ▰▰▰▰▰▰▱
 > 记得存档。
 📍 东京都瑞穗町长冈(古河面包店)
-[去萌娘百科看这条线](https://zh.moegirl.org.cn/CLANNAD/圣地巡礼)
+<https://zh.moegirl.org.cn/CLANNAD/圣地巡礼>
 ***
 2026-11-26 · 换一位发 /换老婆
 ```
+
+> 注意 QQ 的图片语法**必须带尺寸**（`![alt #宽px #高px](url)`）。只写 `![alt](url)` 会被降级成链接文字，图不会出来 —— v2.0.5 就是踩了这个坑。
 
 圣地巡礼卡片：
 
@@ -170,13 +172,15 @@ QQ 官方机器人（`qq_official` / `qq_official_webhook`）已全量开放 Mar
 
 本插件的处理方式：
 
-- **Markdown 平台**：把立绘写成 `![角色名](公网URL)` 放进 Markdown 正文，
+- **Markdown 平台**：把立绘写成 `![角色名 #240px #320px](公网URL)` 放进 Markdown 正文，
   平台会自己去下载转存，于是「一条消息 + Markdown + 图片在名字下面」三者兼得；
+  **尺寸参数不能省**，省了 QQ 就只当普通链接处理；
 - 公网地址取自 Bangumi 镜像（接口直出的 `bgmimg.sakuraspark.fun`），并本地缓存；
 - `image_source=local`（只用本地图片）时不会把本地文件传上去，改为纯 Markdown 无图；
 - **其他平台**：用消息链 `[文字, 图片, 文字]`，同样一条消息、图片在名字下面。
 
-如果某天平台侧不让外链图片，把 `render_mode` 改成 `text` 即可退回纯文本 + 图片附件。
+如果某天平台侧不让外链图片（QQ 侧偶发），把 `render_mode` 改成 `text` 即可退回
+「纯文本卡片 + 图片附件」的同一条消息，图片必定可见。
 
 ## 关于「一条消息两个名字」
 
@@ -295,7 +299,7 @@ core/parser.py        # 参数解析、长消息分段
 core/render.py        # 纯文本渲染
 core/theme.py         # 视觉常量（分隔线、签运、链接）
 assets/               # 内置初始数据
-tests/                # 单测（111 项）
+tests/                # 单测（114 项）
 ```
 
 ---

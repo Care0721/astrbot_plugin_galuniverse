@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.fortune import daily_seed, pick_fortune, pick_index, today_key  # noqa: E402
+from core.fortune import daily_seed, pick_advice, pick_fortune, pick_index, today_key  # noqa: E402
 from core.models import Heroine, Spot, split_name_work  # noqa: E402
 from core.parser import chunk_text, split_fields, strip_command  # noqa: E402
 from core.store import GalStore, StateStore  # noqa: E402
@@ -75,6 +75,25 @@ class TestFortune(unittest.TestCase):
 
     def test_today_key_format(self):
         self.assertRegex(today_key("Asia/Shanghai"), r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_default_advice_is_short_and_human(self):
+        from core.fortune import DEFAULT_ADVICE
+
+        self.assertGreaterEqual(len(DEFAULT_ADVICE), 10)
+        for line in DEFAULT_ADVICE:
+            self.assertLessEqual(len(line), 20, line)
+            self.assertTrue(line.endswith("。"), line)
+
+    def test_pick_advice_falls_back_to_default_pool(self):
+        from core.fortune import DEFAULT_ADVICE
+
+        seed = daily_seed("u:1", "2026-11-26")
+        self.assertIn(pick_advice(seed, []), DEFAULT_ADVICE)
+        self.assertIn(pick_advice(seed, None), DEFAULT_ADVICE)
+
+    def test_pick_advice_uses_custom_pool(self):
+        seed = daily_seed("u:1", "2026-11-26")
+        self.assertEqual(pick_advice(seed, ["只有这一句"]), "只有这一句")
 
 
 class TestStore(unittest.TestCase):

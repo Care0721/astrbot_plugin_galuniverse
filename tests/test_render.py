@@ -65,7 +65,7 @@ class TestDailyCard(unittest.TestCase):
         )
         self.assertEqual(
             text,
-            f"🌙 今日老婆\n{D}\n古河渚 · CLANNAD\n✨ 大吉 ▰▰▰▰▰▰▱\n"
+            f"🌙 今日老婆\n{D}\n【古河渚 · CLANNAD】\n✨ 大吉 ▰▰▰▰▰▰▱\n"
             f"记得存档。\n{D}\n2026-11-26 · 换一位发 /换老婆",
         )
 
@@ -85,7 +85,7 @@ class TestDailyCard(unittest.TestCase):
 
     def test_name_without_work(self):
         text = render.daily_card(Heroine(name="无名"), "中吉", "建议", "2026-11-26")
-        self.assertIn("\n无名\n", text)
+        self.assertIn("\n【无名】\n", text)
 
     def test_with_spot_single(self):
         spot = Spot(work="Fate", name="冬木市", link="https://zh.moegirl.org.cn/Fate")
@@ -99,8 +99,8 @@ class TestDailyCard(unittest.TestCase):
         )
         self.assertEqual(
             text,
-            f"🌙 今日老婆\n{D}\n阿尔托莉雅 · Fate\n🌈 超大吉 ▰▰▰▰▰▰▰\n"
-            f"记得存档。\n📍 冬木市\nhttps://zh.moegirl.org.cn/Fate\n"
+            f"🌙 今日老婆\n{D}\n【阿尔托莉雅 · Fate】\n🌈 超大吉 ▰▰▰▰▰▰▰\n"
+            f"记得存档。\n📍 冬木市\n🔗 https://zh.moegirl.org.cn/Fate\n"
             f"{D}\n2026-11-26 · 换一位发 /换老婆",
         )
 
@@ -159,10 +159,12 @@ class TestDailyMarkdown(unittest.TestCase):
         )
         lines = text.splitlines()
         self.assertEqual(lines[0], "## 🌙 今日老婆")
-        self.assertEqual(lines[1], "**古河渚** · CLANNAD")
-        self.assertEqual(lines[2], "![古河渚](https://img.example.com/a.jpg)")
+        self.assertEqual(lines[1], "# 古河渚 · CLANNAD")
+        self.assertEqual(
+            lines[2], "![古河渚 #240px #320px](https://img.example.com/a.jpg)"
+        )
         self.assertIn("> 记得存档。", text)
-        self.assertIn("[去萌娘百科看这条线](https://zh.moegirl.org.cn/CLANNAD)", text)
+        self.assertIn("<https://zh.moegirl.org.cn/CLANNAD>", text)
         self.assertIn("***", text)
         self.assertIn("2026-11-26 · 换一位发 /换老婆", text)
 
@@ -174,7 +176,7 @@ class TestDailyMarkdown(unittest.TestCase):
             "2026-11-26",
             image_url="https://img.example.com/a.jpg",
         )
-        self.assertLess(text.index("**古河渚**"), text.index("!["))
+        self.assertLess(text.index("# 古河渚"), text.index("!["))
         self.assertLess(text.index("!["), text.index("✨"))
 
     def test_without_image(self):
@@ -189,7 +191,7 @@ class TestDailyParts(unittest.TestCase):
         head, tail = render.daily_parts(
             Heroine(name="古河渚", work="CLANNAD"), "大吉", "记得存档。", "2026-11-26"
         )
-        self.assertEqual(head, f"🌙 今日老婆\n{D}\n古河渚 · CLANNAD")
+        self.assertEqual(head, f"🌙 今日老婆\n{D}\n【古河渚 · CLANNAD】")
         self.assertTrue(tail.startswith("✨ 大吉"))
         self.assertIn(D, tail)
 

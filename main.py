@@ -28,13 +28,20 @@ from .core.parser import chunk_text, normalize, parse_int, split_fields, split_f
 from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
-VERSION = "2.0.5"
+VERSION = "2.0.6"
 
 MARKDOWN_PLATFORMS = {"qq_official", "qq_official_webhook"}
 """原生支持 Markdown 的平台。QQ 官方机器人群聊/单聊已全量开放。"""
 
 LEGACY_PLUGIN_NAMES = ("astrbot_plugin_galuniverse",)
 """历史版本用过的插件名。数据目录跟着插件名走，改名后需要做一次补录。"""
+
+LEGACY_ADVICE_DEFAULTS = {
+    "今天适合重温一段旧剧情，别忘了存档。",
+    "去听听 OST 吧，情绪会被温柔地接住。",
+    "给喜欢的人发一句晚安，今天就算圆满。",
+}
+"""v2.0.3 及更早版本的默认建议文案。配置里原封不动还是这套时自动换成新版。"""
 
 ADMIN_SUBS = {
     "添加老婆",
@@ -161,6 +168,20 @@ class GalUniversePlugin(Star):
         except Exception:
             return False
 
+    def _advice_pool(self) -> list[str]:
+        """今日建议文案池。
+
+        AstrBot 会把配置落盘，改了 schema 默认值对老用户不生效，
+        所以这里主动识别「还是旧版那三句」的情况，换成新文案。
+        """
+        raw = self._cfg("advice_pool", []) or []
+        if isinstance(raw, str):
+            raw = raw.replace("\r", "\n").split("\n")
+        pool = [str(x).strip() for x in raw if str(x).strip()]
+        if pool and set(pool) <= LEGACY_ADVICE_DEFAULTS:
+            return []  # 返回空 → 用内置新文案
+        return pool
+
     def _platform(self, event: AstrMessageEvent) -> str:
         try:
             return str(event.get_platform_name() or "")
@@ -231,7 +252,7 @@ class GalUniversePlugin(Star):
         """
         seed = daily_seed(scope_key, date_key, reroll)
         fortune = pick_fortune(seed, list(self._cfg("fortune_pool", []) or []))
-        advice = pick_advice(seed, list(self._cfg("advice_pool", []) or []))
+        advice = pick_advice(seed, self._advice_pool())
 
         heroine, image_url = await self._pick_from_mirror(seed)
         if heroine is not None:

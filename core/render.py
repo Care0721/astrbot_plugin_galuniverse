@@ -32,6 +32,10 @@ def card(header: str, body: Iterable[str], footer: Sequence[str] = ()) -> str:
 
 DAILY_TITLE = "🌙 今日老婆"
 
+MARKDOWN_IMAGE_W = 240
+MARKDOWN_IMAGE_H = 320
+"""QQ 官方 Markdown 的图片尺寸提示（3:4，Gal 立绘基本都是竖图）。"""
+
 
 def _fortune_line(fortune: str, markdown: bool = False) -> str:
     emoji, _ = fortune_style(fortune)
@@ -40,9 +44,9 @@ def _fortune_line(fortune: str, markdown: bool = False) -> str:
 
 
 def _daily_name(heroine: Heroine, markdown: bool = False) -> str:
-    if not markdown:
-        return heroine.label
-    return f"**{heroine.name}** · {heroine.work}" if heroine.work else f"**{heroine.name}**"
+    """名字是整张卡的主角，纯文本用【】框住，Markdown 用一级标题顶格。"""
+    label = heroine.label
+    return f"# {label}" if markdown else f"【{label}】"
 
 
 def _daily_body_lines(
@@ -59,7 +63,9 @@ def _daily_body_lines(
         lines.append(f"📍 {spot.name}")
         link = short_link(spot.link, link_style)
         if link:
-            lines.append(f"[去萌娘百科看这条线]({link})" if markdown else link)
+            # Markdown 用 <url> 包一层，既显示完整地址又能点开；
+            # 纯文本直接给裸 URL，客户端会自动识别成链接。
+            lines.append(f"<{link}>" if markdown else f"🔗 {link}")
     return lines
 
 
@@ -139,10 +145,14 @@ def daily_markdown(
     link_style: str = "full",
     image_url: str = "",
 ) -> str:
-    """QQ 官方等支持 Markdown 的平台用这一版：图片用 ``![](url)`` 内嵌在名字下面。"""
+    """QQ 官方等支持 Markdown 的平台用这一版：图片用 ``![](url)`` 内嵌在名字下面。
+
+    注意 QQ 的图片语法**必须带尺寸**（``![alt #宽px #高px](url)``），
+    只写 ``![alt](url)`` 会被当成链接、图不出来。
+    """
     lines = [f"## {DAILY_TITLE}", _daily_name(heroine, markdown=True)]
     if image_url:
-        lines.append(f"![{heroine.name}]({image_url})")
+        lines.append(f"![{heroine.name} #{MARKDOWN_IMAGE_W}px #{MARKDOWN_IMAGE_H}px]({image_url})")
     lines.extend(_daily_body_lines(fortune, advice, spot, link_style, markdown=True))
     lines.append("***")
     lines.extend(_daily_footer_lines(date_key, reroll, can_reroll, spot, spot_total))
