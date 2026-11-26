@@ -4,7 +4,7 @@
 
 支持 **OneBot v11（aiocqhttp / NapCat / Lagrange）**、QQ 官方机器人、Telegram、Discord、飞书等 AstrBot 已接入的平台。指令输出为纯文本，不依赖 Markdown 渲染。
 
-当前版本：**v2.0.6**
+当前版本：**v2.0.7**
 
 ---
 
@@ -97,7 +97,7 @@
 | `enable_spot_link` | bool | true | 今日老婆附带圣地信息 |
 | `image_source` | string | `auto` | 立绘来源：`auto` / `bangumi` / `local` / `off` |
 | `image_cache_days` | int | 30 | 立绘缓存天数 |
-| `render_mode` | string | `auto` | 消息格式：`auto`（支持就 Markdown）/ `markdown` / `text` |
+| `render_mode` | string | `auto` | 消息格式：`auto`（图片走附件，必定显示）/ `markdown` / `text` |
 | `single_message` | bool | true | 图文合成一条消息，立绘插在名字下面 |
 | `pool_source` | string | `hybrid` | 角色池：`hybrid`（本地+镜像）/ `bangumi`（仅镜像）/ `local`（仅本地） |
 | `bangumi_ratio` | int | 50 | 镜像抽取占比 %，仅 `hybrid` 生效，0 等于只用本地 |
@@ -170,17 +170,25 @@ QQ 官方机器人（`qq_official` / `qq_official_webhook`）已全量开放 Mar
 「Markdown 消息（`msg_type=2`）」与「富媒体消息（`msg_type=7`）」是互斥的两种消息类型，
 不能在同一条里既发 Markdown 又挂图片附件。
 
-本插件的处理方式：
+本插件的处理方式（`render_mode=auto`，默认）：
 
-- **Markdown 平台**：把立绘写成 `![角色名 #240px #320px](公网URL)` 放进 Markdown 正文，
-  平台会自己去下载转存，于是「一条消息 + Markdown + 图片在名字下面」三者兼得；
-  **尺寸参数不能省**，省了 QQ 就只当普通链接处理；
-- 公网地址取自 Bangumi 镜像（接口直出的 `bgmimg.sakuraspark.fun`），并本地缓存；
-- `image_source=local`（只用本地图片）时不会把本地文件传上去，改为纯 Markdown 无图；
-- **其他平台**：用消息链 `[文字, 图片, 文字]`，同样一条消息、图片在名字下面。
+1. 先把立绘下载到本地缓存；
+2. 若 AstrBot 配了 **`callback_api_base`（外部访问地址）**，把本地图注册成
+   `https://你的域名/api/file/<token>`，再以 `![名字 #240px #320px](该地址)` 内嵌进 Markdown ——
+   这是**用户自己的域名**，平台一定下得动，图片正好落在名字下面；
+3. 没配或注册失败，退回「图片附件 + 纯文本卡片」的**同一条消息** —— 图片必定显示。
 
-如果某天平台侧不让外链图片（QQ 侧偶发），把 `render_mode` 改成 `text` 即可退回
-「纯文本卡片 + 图片附件」的同一条消息，图片必定可见。
+> 为什么不能直接用 Bangumi 镜像的地址内嵌？QQ 的服务器在下载外链图，
+> `bgmimg.sakuraspark.fun` 这类境外/Cloudflare 镜像它下不动，消息里就会显示「加载失败」。
+> v2.0.5/2.0.6 踩的就是这个坑。
+
+三种模式：
+
+| `render_mode` | 行为 |
+|---|---|
+| `auto`（默认） | 能内嵌就内嵌（需 `callback_api_base`），否则图片附件 |
+| `markdown` | 强制 Markdown，图片用文件服务或镜像外链内嵌，可能加载失败 |
+| `text` | 强制纯文本卡片 + 图片附件，兼容性最好 |
 
 ## 关于「一条消息两个名字」
 

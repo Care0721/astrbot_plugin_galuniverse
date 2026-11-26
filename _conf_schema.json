@@ -147,12 +147,13 @@
     "type": "string",
     "default": "auto",
     "options": ["auto", "markdown", "text"],
-    "labels": ["自动（支持就用 Markdown）", "强制 Markdown", "强制纯文本"],
+    "labels": ["自动（图片走附件，必定显示）", "强制 Markdown", "强制纯文本"],
     "subtitles": [
-      "QQ 官方机器人用 Markdown，其他平台用纯文本",
-      "仅对支持 Markdown 的平台生效，图片以 ![](url) 内嵌",
-      "所有平台都用纯文本卡片"
-    ]
+      "立绘作为图片附件上传，平台一定能显示；没有图时才用 Markdown",
+      "用 Markdown 排版并把图片内嵌为链接，需要平台能下载到那张外链图",
+      "纯文本卡片 + 图片附件，兼容性最好"
+    ],
+    "hint": "QQ 官方机器人建议保持 auto：Markdown 内嵌图片依赖平台侧下载外链，可能显示「加载失败」"
   },
   "single_message": {
     "description": "图文合成一条消息",

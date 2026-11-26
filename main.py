@@ -28,7 +28,7 @@ from .core.parser import chunk_text, normalize, parse_int, split_fields, split_f
 from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
-VERSION = "2.0.6"
+VERSION = "2.0.7"
 
 MARKDOWN_PLATFORMS = {"qq_official", "qq_official_webhook"}
 """原生支持 Markdown 的平台。QQ 官方机器人群聊/单聊已全量开放。"""
@@ -306,6 +306,22 @@ class GalUniversePlugin(Star):
             )
         return None
 
+    async def _markdown_image_url(self, path: Path | None, fallback: str) -> str:
+        """Markdown 内嵌图用哪个地址。
+
+        优先用 AstrBot 自带的文件服务（``callback_api_base``）—— 那是用户自己的域名，
+        平台一定下得动；没配置或注册失败时再退回 Bangumi 镜像地址。
+        """
+        if path is not None:
+            try:
+                img = Image.fromFileSystem(str(path))
+                url = await img.register_to_file_service()
+                if isinstance(url, str) and url.startswith("http"):
+                    return url
+            except Exception:
+                pass
+        return fallback
+
     async def _emit_daily(
         self,
         event: AstrMessageEvent,
@@ -318,9 +334,11 @@ class GalUniversePlugin(Star):
     ):
         """今日老婆：整张卡片 + 立绘**只发一条消息**。
 
-        - Markdown 平台（QQ 官方）：`![](公网地址)` 内嵌图片，图片就落在名字下面；
-        - 其他平台（OneBot 等）：`[文本, 图片, 文本]` 消息链，同样图文混排；
-        - 拿不到图或关闭了图片：只发一条文字卡片。
+        三种形态：
+        - ``auto``（默认）：图片走**附件**上传，平台保证能显示；没有图时才用 Markdown；
+        - ``markdown``：强制 Markdown，图片以 ``![](公网地址)`` 内嵌
+          （需要平台侧能下载那个外链，QQ 不一定通）；
+        - ``text``：强制纯文本 + 图片附件。
         """
         spot, total = self._spot_for(heroine)
         common = {
@@ -332,25 +350,33 @@ class GalUniversePlugin(Star):
         }
         source = str(self._cfg("image_source", "auto") or "auto")
         single = bool(self._cfg("single_message", True))
+        mode = str(self._cfg("render_mode", "auto") or "auto").strip().lower()
 
-        if self._markdown_enabled(event):
-            public = ""
-            if source in {"auto", "bangumi"}:
-                public = await self.images.resolve_url(
-                    heroine.name, heroine.work, image_url
+        # 先把立绘拿到本地（缓存命中时是瞬间的）
+        path: Path | None = None
+        if source != "off":
+            path = await self._image_path(heroine, image_url)
+
+        if self._markdown_enabled(event) and mode in {"auto", "markdown"}:
+            if mode == "markdown":
+                # 强制 Markdown：优先文件服务，其次镜像外链
+                public = await self._markdown_image_url(path, image_url)
+                if not public and path is None and source in {"auto", "bangumi"}:
+                    public = await self.images.resolve_url(
+                        heroine.name, heroine.work, image_url
+                    )
+            else:
+                # auto：只有拿到「平台一定下得动」的地址（AstrBot 文件服务）才内嵌，
+                # 否则退回附件 —— 免得 QQ 显示「加载失败」
+                public = await self._markdown_image_url(path, "") if path else ""
+
+            if public or path is None:
+                text = render.daily_markdown(
+                    heroine, fortune, advice, date_key, image_url=public, **common
                 )
-            text = render.daily_markdown(
-                heroine, fortune, advice, date_key, image_url=public, **common
-            )
-            yield self._with_markdown(event.plain_result(text), True)
-            return
+                yield self._with_markdown(event.plain_result(text), True)
+                return
 
-        if source == "off":
-            text = render.daily_card(heroine, fortune, advice, date_key, **common)
-            yield self._with_markdown(event.plain_result(text), False)
-            return
-
-        path = await self._image_path(heroine, image_url)
         if path is None or not single:
             text = render.daily_card(heroine, fortune, advice, date_key, **common)
             yield self._with_markdown(event.plain_result(text), False)
