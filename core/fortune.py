@@ -45,7 +45,7 @@ def pick_fortune(seed: str, pool: list[str] | None = None) -> str:
 def pick_advice(seed: str, pool: list[str] | None = None) -> str:
     options = [str(x).strip() for x in (pool or []) if str(x).strip()]
     if not options:
-        return "今天也一起去看看新的故事吧。"
+        return "记得存档。"
     return options[pick_index(f"{seed}|advice", len(options))]
 
 

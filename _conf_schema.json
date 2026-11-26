@@ -90,9 +90,18 @@
     "description": "今日建议文案",
     "type": "list",
     "default": [
-      "今天适合重温一段旧剧情，别忘了存档。",
-      "去听听 OST 吧，情绪会被温柔地接住。",
-      "给喜欢的人发一句晚安，今天就算圆满。"
+      "记得存档。",
+      "今天别熬太晚。",
+      "适合把没推完的那条线推完。",
+      "去把 OP 再听一遍。",
+      "想见的人就发条消息。",
+      "路过便利店买瓶热饮。",
+      "先把桌面收拾一下再开工。",
+      "别跳过 ED。",
+      "手边放杯水，别光顾着推线。",
+      "抽空把存档备份一下。",
+      "早点睡，明天还有新剧情。",
+      "今天适合重看喜欢的 CG。"
     ],
     "hint": "留空则使用内置默认文案"
   },
@@ -133,6 +142,24 @@
       "只显示地点名称"
     ]
   },
+  "render_mode": {
+    "description": "消息格式",
+    "type": "string",
+    "default": "auto",
+    "options": ["auto", "markdown", "text"],
+    "labels": ["自动（支持就用 Markdown）", "强制 Markdown", "强制纯文本"],
+    "subtitles": [
+      "QQ 官方机器人用 Markdown，其他平台用纯文本",
+      "仅对支持 Markdown 的平台生效，图片以 ![](url) 内嵌",
+      "所有平台都用纯文本卡片"
+    ]
+  },
+  "single_message": {
+    "description": "图文合成一条消息",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后立绘插在角色名字下面，一条消息发完；关闭则文字、图片各发一条"
+  },
   "max_chars_per_message": {
     "description": "单条消息最大字数",
     "type": "int",
@@ -144,7 +171,7 @@
     "description": "群聊回复时 @ 发送者",
     "type": "bool",
     "default": false,
-    "hint": "仅 OneBot(aiocqhttp) 群聊生效，其他平台自动忽略"
+    "hint": "仅 OneBot(aiocqhttp) 生效；QQ 官方机器人会渲染成 <qqbot-at-user/> 文本，已自动忽略"
   },
   "extra_admin_ids": {
     "description": "额外管理员 ID",

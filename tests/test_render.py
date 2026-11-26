@@ -61,47 +61,47 @@ class TestTheme(unittest.TestCase):
 class TestDailyCard(unittest.TestCase):
     def test_first_draw(self):
         text = render.daily_card(
-            Heroine(name="古河渚", work="CLANNAD"), "大吉", "测试建议", "2026-11-26"
+            Heroine(name="古河渚", work="CLANNAD"), "大吉", "记得存档。", "2026-11-26"
         )
         self.assertEqual(
             text,
-            f"🌙 今日 Gal 运势\n{D}\n👤 古河渚 · CLANNAD\n✨ 大吉 ▰▰▰▰▰▰▱\n"
-            f"📖 测试建议\n{D}\n🕒 2026-11-26\n💡 /换老婆 换一位",
+            f"🌙 今日老婆\n{D}\n古河渚 · CLANNAD\n✨ 大吉 ▰▰▰▰▰▰▱\n"
+            f"记得存档。\n{D}\n2026-11-26 · 换一位发 /换老婆",
         )
 
     def test_reroll_count(self):
         text = render.daily_card(
             Heroine(name="古河渚", work="CLANNAD"), "凶", "建议", "2026-11-26", reroll=1
         )
-        self.assertIn("🕒 2026-11-26 · 第 2 抽", text)
+        self.assertIn("2026-11-26 · 第 2 抽 · 换一位发 /换老婆", text)
         self.assertIn("🌧 凶 ▰▱▱▱▱▱▱", text)
 
     def test_no_reroll(self):
         text = render.daily_card(
             Heroine(name="古河渚"), "平", "建议", "2026-11-26", can_reroll=False
         )
-        self.assertIn("💡 明天再来抽一次", text)
+        self.assertIn("2026-11-26 · 明天再来", text)
         self.assertNotIn("/换老婆", text)
 
     def test_name_without_work(self):
         text = render.daily_card(Heroine(name="无名"), "中吉", "建议", "2026-11-26")
-        self.assertIn("👤 无名\n", text)
+        self.assertIn("\n无名\n", text)
 
     def test_with_spot_single(self):
         spot = Spot(work="Fate", name="冬木市", link="https://zh.moegirl.org.cn/Fate")
         text = render.daily_card(
             Heroine(name="阿尔托莉雅", work="Fate"),
             "超大吉",
-            "给喜欢的人发一句晚安。",
+            "记得存档。",
             "2026-11-26",
             spot=spot,
             spot_total=1,
         )
         self.assertEqual(
             text,
-            f"🌙 今日 Gal 运势\n{D}\n👤 阿尔托莉雅 · Fate\n🌈 超大吉 ▰▰▰▰▰▰▰\n"
-            f"📖 给喜欢的人发一句晚安。\n🗺️ 圣地 · 冬木市\n"
-            f"🔗 https://zh.moegirl.org.cn/Fate\n{D}\n🕒 2026-11-26\n💡 /换老婆 换一位",
+            f"🌙 今日老婆\n{D}\n阿尔托莉雅 · Fate\n🌈 超大吉 ▰▰▰▰▰▰▰\n"
+            f"记得存档。\n📍 冬木市\nhttps://zh.moegirl.org.cn/Fate\n"
+            f"{D}\n2026-11-26 · 换一位发 /换老婆",
         )
 
     def test_with_spot_multiple_adds_hint(self):
@@ -114,15 +114,15 @@ class TestDailyCard(unittest.TestCase):
             spot=spot,
             spot_total=3,
         )
-        self.assertIn("💡 /圣地巡礼 Fate 共 3 处", text)
+        self.assertIn("这部作品还有 3 处 · /圣地巡礼 Fate", text)
 
     def test_spot_without_link(self):
         spot = Spot(work="Fate", name="冬木市", link="")
         text = render.daily_card(
             Heroine(name="阿尔托莉雅", work="Fate"), "大吉", "建议", "2026-11-26", spot=spot
         )
-        self.assertIn("🗺️ 圣地 · 冬木市", text)
-        self.assertNotIn("🔗", text)
+        self.assertIn("📍 冬木市", text)
+        self.assertNotIn("https://", text)
 
     def test_spot_hidden_link_style(self):
         spot = Spot(work="Fate", name="冬木市", link="https://zh.moegirl.org.cn/Fate")
@@ -134,7 +134,69 @@ class TestDailyCard(unittest.TestCase):
             spot=spot,
             link_style="hidden",
         )
-        self.assertNotIn("🔗", text)
+        self.assertNotIn("https://", text)
+
+    def test_empty_advice_omitted(self):
+        text = render.daily_card(Heroine(name="古河渚"), "平", "", "2026-11-26")
+        self.assertNotIn("\n\n", text)
+
+
+class TestDailyMarkdown(unittest.TestCase):
+    def setUp(self):
+        self.spot = Spot(
+            work="CLANNAD", name="古河面包店", link="https://zh.moegirl.org.cn/CLANNAD"
+        )
+
+    def test_structure(self):
+        text = render.daily_markdown(
+            Heroine(name="古河渚", work="CLANNAD"),
+            "大吉",
+            "记得存档。",
+            "2026-11-26",
+            spot=self.spot,
+            spot_total=2,
+            image_url="https://img.example.com/a.jpg",
+        )
+        lines = text.splitlines()
+        self.assertEqual(lines[0], "## 🌙 今日老婆")
+        self.assertEqual(lines[1], "**古河渚** · CLANNAD")
+        self.assertEqual(lines[2], "![古河渚](https://img.example.com/a.jpg)")
+        self.assertIn("> 记得存档。", text)
+        self.assertIn("[去萌娘百科看这条线](https://zh.moegirl.org.cn/CLANNAD)", text)
+        self.assertIn("***", text)
+        self.assertIn("2026-11-26 · 换一位发 /换老婆", text)
+
+    def test_image_under_name(self):
+        text = render.daily_markdown(
+            Heroine(name="古河渚", work="CLANNAD"),
+            "大吉",
+            "建议",
+            "2026-11-26",
+            image_url="https://img.example.com/a.jpg",
+        )
+        self.assertLess(text.index("**古河渚**"), text.index("!["))
+        self.assertLess(text.index("!["), text.index("✨"))
+
+    def test_without_image(self):
+        text = render.daily_markdown(
+            Heroine(name="古河渚", work="CLANNAD"), "大吉", "建议", "2026-11-26"
+        )
+        self.assertNotIn("![", text)
+
+
+class TestDailyParts(unittest.TestCase):
+    def test_split_at_name(self):
+        head, tail = render.daily_parts(
+            Heroine(name="古河渚", work="CLANNAD"), "大吉", "记得存档。", "2026-11-26"
+        )
+        self.assertEqual(head, f"🌙 今日老婆\n{D}\n古河渚 · CLANNAD")
+        self.assertTrue(tail.startswith("✨ 大吉"))
+        self.assertIn(D, tail)
+
+    def test_parts_rejoin_to_card(self):
+        args = (Heroine(name="古河渚", work="CLANNAD"), "大吉", "记得存档。", "2026-11-26")
+        head, tail = render.daily_parts(*args)
+        self.assertEqual(f"{head}\n{tail}", render.daily_card(*args))
 
 
 class TestSpotCard(unittest.TestCase):

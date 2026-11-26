@@ -16,7 +16,7 @@ from pathlib import Path
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.message_components import At, Plain
+from astrbot.api.message_components import At, Image, Plain
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core import render
@@ -28,7 +28,10 @@ from .core.parser import chunk_text, normalize, parse_int, split_fields, split_f
 from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
-VERSION = "2.0.3"
+VERSION = "2.0.5"
+
+MARKDOWN_PLATFORMS = {"qq_official", "qq_official_webhook"}
+"""原生支持 Markdown 的平台。QQ 官方机器人群聊/单聊已全量开放。"""
 
 LEGACY_PLUGIN_NAMES = ("astrbot_plugin_galuniverse",)
 """历史版本用过的插件名。数据目录跟着插件名走，改名后需要做一次补录。"""
@@ -158,23 +161,48 @@ class GalUniversePlugin(Star):
         except Exception:
             return False
 
+    def _platform(self, event: AstrMessageEvent) -> str:
+        try:
+            return str(event.get_platform_name() or "")
+        except Exception:
+            return ""
+
+    def _markdown_enabled(self, event: AstrMessageEvent) -> bool:
+        """是否用 Markdown 渲染。只有平台本身支持时才可能为真。"""
+        mode = str(self._cfg("render_mode", "auto") or "auto").strip().lower()
+        if mode == "text":
+            return False
+        if self._platform(event) not in MARKDOWN_PLATFORMS:
+            return False
+        return True
+
+    @staticmethod
+    def _with_markdown(result, markdown: bool):
+        """QQ 官方适配器默认按 Markdown 发送，纯文本模式必须显式关掉。"""
+        try:
+            result.use_markdown(markdown)
+        except Exception:
+            pass
+        return result
+
     async def _reply(self, event: AstrMessageEvent, text: str):
-        """统一出口：长消息分段；OneBot 群聊可选 @ 发送者。"""
+        """统一出口：长消息分段；@ 只在 OneBot 生效。"""
         limit = parse_int(self._cfg("max_chars_per_message", 1000), 1000)
         want_at = bool(self._cfg("reply_with_at", False))
         in_group = bool(event.get_group_id())
-        is_onebot = False
-        try:
-            is_onebot = event.get_platform_name() == "aiocqhttp"
-        except Exception:
-            pass
-        use_at = want_at and in_group and is_onebot
+        platform = self._platform(event)
+        # QQ 官方机器人会把 At 组件渲染成 <qqbot-at-user id="..."/> 纯文本，只能关掉
+        use_at = want_at and in_group and platform == "aiocqhttp"
+        markdown = self._markdown_enabled(event)
 
         for chunk in chunk_text(text, limit):
             if use_at:
-                yield event.chain_result([At(qq=self._sender_id(event)), Plain(chunk)])
+                result = event.chain_result(
+                    [At(qq=self._sender_id(event)), Plain(chunk)]
+                )
             else:
-                yield event.plain_result(chunk)
+                result = event.plain_result(chunk)
+            yield self._with_markdown(result, markdown)
 
     def _scope_key(self, event: AstrMessageEvent) -> str:
         scope = str(self._cfg("fortune_scope", "per_user") or "per_user")
@@ -236,29 +264,26 @@ class GalUniversePlugin(Star):
             logger.warning(f"[GalUniverse] 镜像角色池异常：{exc}")
             return None, ""
 
-    async def _emit_image(self, event: AstrMessageEvent, heroine: Heroine, image_url: str = ""):
-        """拉取角色立绘；任何失败都静默跳过，不影响文字卡片。"""
+    async def _image_path(self, heroine: Heroine, image_url: str = "") -> Path | None:
+        """拉取角色立绘到本地；任何失败都返回 None，不影响文字卡片。"""
         if str(self._cfg("image_source", "auto")) == "off":
-            return
+            return None
         try:
             path = await self.images.fetch(heroine.name, heroine.work, image_url=image_url)
         except Exception as exc:
             logger.warning(f"[GalUniverse] 立绘获取失败：{exc}")
-            return
-        if not path:
-            # 每个角色只提示一次，避免刷屏，同时方便排查网络问题
-            if heroine.name not in self._image_warned and len(self._image_warned) < 200:
-                self._image_warned.add(heroine.name)
-                bases = "、".join(self.images.api_candidates())
-                logger.info(
-                    f"[GalUniverse] 未取到「{heroine.name}」的立绘"
-                    f"（来源={self._cfg('image_source', 'auto')}，接口={bases}）"
-                )
-            return
-        try:
-            yield event.image_result(str(path))
-        except Exception as exc:
-            logger.warning(f"[GalUniverse] 立绘发送失败：{exc}")
+            return None
+        if path:
+            return path
+        # 每个角色只提示一次，避免刷屏，同时方便排查网络问题
+        if heroine.name not in self._image_warned and len(self._image_warned) < 200:
+            self._image_warned.add(heroine.name)
+            bases = "、".join(self.images.api_candidates())
+            logger.info(
+                f"[GalUniverse] 未取到「{heroine.name}」的立绘"
+                f"（来源={self._cfg('image_source', 'auto')}，接口={bases}）"
+            )
+        return None
 
     async def _emit_daily(
         self,
@@ -270,22 +295,51 @@ class GalUniversePlugin(Star):
         reroll: int = 0,
         image_url: str = "",
     ):
+        """今日老婆：整张卡片 + 立绘**只发一条消息**。
+
+        - Markdown 平台（QQ 官方）：`![](公网地址)` 内嵌图片，图片就落在名字下面；
+        - 其他平台（OneBot 等）：`[文本, 图片, 文本]` 消息链，同样图文混排；
+        - 拿不到图或关闭了图片：只发一条文字卡片。
+        """
         spot, total = self._spot_for(heroine)
-        text = render.daily_card(
-            heroine,
-            fortune,
-            advice,
-            date_key,
-            reroll=reroll,
-            can_reroll=parse_int(self._cfg("reroll_per_day", 1), 1) > 0,
-            spot=spot,
-            spot_total=total,
-            link_style=self._link_style(),
-        )
-        async for msg in self._reply(event, text):
-            yield msg
-        async for msg in self._emit_image(event, heroine, image_url):
-            yield msg
+        common = {
+            "reroll": reroll,
+            "can_reroll": parse_int(self._cfg("reroll_per_day", 1), 1) > 0,
+            "spot": spot,
+            "spot_total": total,
+            "link_style": self._link_style(),
+        }
+        source = str(self._cfg("image_source", "auto") or "auto")
+        single = bool(self._cfg("single_message", True))
+
+        if self._markdown_enabled(event):
+            public = ""
+            if source in {"auto", "bangumi"}:
+                public = await self.images.resolve_url(
+                    heroine.name, heroine.work, image_url
+                )
+            text = render.daily_markdown(
+                heroine, fortune, advice, date_key, image_url=public, **common
+            )
+            yield self._with_markdown(event.plain_result(text), True)
+            return
+
+        if source == "off":
+            text = render.daily_card(heroine, fortune, advice, date_key, **common)
+            yield self._with_markdown(event.plain_result(text), False)
+            return
+
+        path = await self._image_path(heroine, image_url)
+        if path is None or not single:
+            text = render.daily_card(heroine, fortune, advice, date_key, **common)
+            yield self._with_markdown(event.plain_result(text), False)
+            if path is not None:
+                yield event.image_result(str(path))
+            return
+
+        head, tail = render.daily_parts(heroine, fortune, advice, date_key, **common)
+        chain = [Plain(head), Image.fromFileSystem(str(path)), Plain(tail)]
+        yield self._with_markdown(event.chain_result(chain), False)
 
     def _image_mirrors(self) -> list[str] | None:
         """镜像列表：优先读 image_mirrors，兼容旧的 image_mirror 字符串。"""
@@ -677,6 +731,8 @@ class GalUniversePlugin(Star):
         mode = str(self._cfg("pool_source", "hybrid") or "hybrid").strip().lower()
         ratio = parse_int(self._cfg("bangumi_ratio", 50), 50)
         source = f"{mode}（镜像占比 {ratio}%）"
+        render_mode = str(self._cfg("render_mode", "auto") or "auto").strip().lower()
+        single = "图文一条" if bool(self._cfg("single_message", True)) else "图文分两条"
 
         rows = [
             ("🧩 插件名", PLUGIN_NAME),
@@ -686,6 +742,7 @@ class GalUniversePlugin(Star):
             ("👤 名单", f"{stats['heroines']} 位"),
             ("🗺️ 圣地", f"{stats['spots']} 条 / {stats['works']} 部"),
             ("🎲 抽签来源", source),
+            ("💬 消息格式", f"{render_mode} · {single}"),
             ("🌐 接口", " → ".join(self.images.api_candidates())),
             ("🖼️ 图片镜像", f"{len(self.images.mirrors)} 个"),
         ]

@@ -4,7 +4,7 @@
 
 支持 **OneBot v11（aiocqhttp / NapCat / Lagrange）**、QQ 官方机器人、Telegram、Discord、飞书等 AstrBot 已接入的平台。指令输出为纯文本，不依赖 Markdown 渲染。
 
-当前版本：**v2.0.3**
+当前版本：**v2.0.5**
 
 ---
 
@@ -15,13 +15,14 @@
 | 今日老婆 | 每天固定抽一位角色 + 签运 + 建议，同一天结果稳定 |
 | 换老婆 | 每日有限次重抽，次数可配置 |
 | 角色池 | 本地名单与 Bangumi 镜像角色池按比例混合抽取，可抽到名单外角色 |
+| 一条消息 | 立绘插在角色名字下面，图文合成一条消息发完 |
+| Markdown | QQ 官方机器人自动用 Markdown 排版（标题/加粗/引用/内嵌图片） |
 | 圣地巡礼 | 按作品查询取景地，同一作品支持**多条**地点，自动分页 |
 | 圣地列表 | 浏览已收录的全部作品与条目数 |
 | 圣地联动 | 抽到角色后，卡片内直接给出其作品的取景地与**可点击链接** |
-| 角色立绘 | 随卡片附带角色图片，本地优先，缺失时走 Bangumi 镜像 |
 | 数据管理 | 聊天内增删角色/圣地，热重载无需重启 |
 | 自检诊断 | `/gal 诊断` 一眼看清目录、名单量、接口与遗留冲突 |
-| 多平台 | 纯文本输出，OneBot 群聊可选 @ 回复、长消息自动分段 |
+| 多平台 | 纯文本 / Markdown 双形态，OneBot 群聊可选 @ 回复、长消息自动分段 |
 
 内置初始数据：**310 位角色 / 68 条圣地 / 52 部作品**（已去重清洗）。
 
@@ -96,6 +97,8 @@
 | `enable_spot_link` | bool | true | 今日老婆附带圣地信息 |
 | `image_source` | string | `auto` | 立绘来源：`auto` / `bangumi` / `local` / `off` |
 | `image_cache_days` | int | 30 | 立绘缓存天数 |
+| `render_mode` | string | `auto` | 消息格式：`auto`（支持就 Markdown）/ `markdown` / `text` |
+| `single_message` | bool | true | 图文合成一条消息，立绘插在名字下面 |
 | `pool_source` | string | `hybrid` | 角色池：`hybrid`（本地+镜像）/ `bangumi`（仅镜像）/ `local`（仅本地） |
 | `bangumi_ratio` | int | 50 | 镜像抽取占比 %，仅 `hybrid` 生效，0 等于只用本地 |
 | `image_api_bases` | list | 镜像 → 官方 | 接口地址，按顺序兜底，官方恒定最后 |
@@ -103,7 +106,7 @@
 | `page_size` | int | 6 | 每页条数 |
 | `link_style` | string | `full` | 链接展示：`full`（可点击）/ `domain` / `hidden` |
 | `max_chars_per_message` | int | 1000 | 单条消息上限，超出自动分段 |
-| `reply_with_at` | bool | false | OneBot 群聊 @ 发送者 |
+| `reply_with_at` | bool | false | OneBot 群聊 @ 发送者（QQ 官方已自动忽略） |
 | `extra_admin_ids` | list | [] | 额外管理员 ID（见下方 OneBot 说明） |
 | `legacy_import` | bool | true | 首次启动导入旧 TXT |
 
@@ -111,23 +114,38 @@
 
 ## 消息样式
 
-统一「标题 → 分隔线 → 主体 → 分隔线 → 页脚」结构，不用 Markdown、不用表格对齐，任何客户端都不会错行。
+**一条消息发完**：文字卡片 + 立绘插在角色名字下面。
+
+OneBot / Telegram / Discord 等平台走纯文本卡片（图片按消息链顺序插在名字下方）：
 
 ```
-🌙 今日 Gal 运势
+🌙 今日老婆
 ━━━━━━━━━━━━
-👤 古河渚 · CLANNAD
+古河渚 · CLANNAD
+[立绘图片]
 ✨ 大吉 ▰▰▰▰▰▰▱
-📖 今天适合重温一段旧剧情，别忘了存档。
-🗺️ 圣地 · 东京都瑞穗町长冈(古河面包店)
-🔗 https://zh.moegirl.org.cn/CLANNAD/圣地巡礼
+记得存档。
+📍 东京都瑞穗町长冈(古河面包店)
+https://zh.moegirl.org.cn/CLANNAD/圣地巡礼
 ━━━━━━━━━━━━
-🕒 2026-11-26 · 第 2 抽
-💡 /换老婆 换一位
-💡 /圣地巡礼 CLANNAD 共 2 处
+2026-11-26 · 换一位发 /换老婆
 ```
 
-随后会再发一张该角色的立绘（图片发送失败时静默跳过，不影响文字卡片）。
+QQ 官方机器人走 Markdown（`![](公网地址)` 内嵌图片，图片同样落在名字下面）：
+
+```markdown
+## 🌙 今日老婆
+**古河渚** · CLANNAD
+![古河渚](https://bgmimg.sakuraspark.fun/pic/crt/l/....jpg)
+✨ **大吉** ▰▰▰▰▰▰▱
+> 记得存档。
+📍 东京都瑞穗町长冈(古河面包店)
+[去萌娘百科看这条线](https://zh.moegirl.org.cn/CLANNAD/圣地巡礼)
+***
+2026-11-26 · 换一位发 /换老婆
+```
+
+圣地巡礼卡片：
 
 ```
 🗺️ CLANNAD · 圣地巡礼
@@ -140,9 +158,34 @@
 📍 共 2 处 · 第 1/1 页
 ```
 
-链接默认输出**带 `https://` 的完整 URL**，QQ / Telegram / Discord 会自动识别为可点击链接；觉得太长可在配置里把 `link_style` 改成 `domain`。
+链接默认输出**带 `https://` 的完整 URL**，聊天客户端会自动识别为可点击链接；觉得太长可在配置里把 `link_style` 改成 `domain`。
 
 签运分 7 档，各带独立 emoji 与进度条：🌈 超大吉 / ✨ 大吉 / 🍀 中吉 / 🌤️ 小吉 / 🌥️ 末吉 / ☁️ 平 / 🌧 凶。
+
+## 关于 Markdown 与图片
+
+QQ 官方机器人（`qq_official` / `qq_official_webhook`）已全量开放 Markdown，但它的
+「Markdown 消息（`msg_type=2`）」与「富媒体消息（`msg_type=7`）」是互斥的两种消息类型，
+不能在同一条里既发 Markdown 又挂图片附件。
+
+本插件的处理方式：
+
+- **Markdown 平台**：把立绘写成 `![角色名](公网URL)` 放进 Markdown 正文，
+  平台会自己去下载转存，于是「一条消息 + Markdown + 图片在名字下面」三者兼得；
+- 公网地址取自 Bangumi 镜像（接口直出的 `bgmimg.sakuraspark.fun`），并本地缓存；
+- `image_source=local`（只用本地图片）时不会把本地文件传上去，改为纯 Markdown 无图；
+- **其他平台**：用消息链 `[文字, 图片, 文字]`，同样一条消息、图片在名字下面。
+
+如果某天平台侧不让外链图片，把 `render_mode` 改成 `text` 即可退回纯文本 + 图片附件。
+
+## 关于「一条消息两个名字」
+
+v2.0.5 已修：`今日老婆` 现在**只返回一次**结果。旧版是「文字一条 + 图片一条」分两次返回，
+QQ 官方适配器会把同一事件内的返回合并进一个发送缓冲，看起来就像卡片被打印了两遍。
+
+如果升级后仍然重复，说明 `data/plugins/` 下同时存在 `astrbot_plugin_universe` 与
+`astrbot_plugin_galuniverse` 两份插件（v2.0.0 误建的副本），两个实例各答一次。
+删掉旧目录后重载即可，发 `/gal 诊断` 能直接看到这个冲突。
 
 ---
 
@@ -169,6 +212,8 @@
 3. 都拿不到：只发文字卡片，不报错
 
 `image_source` 可强制指定来源，或设 `off` 完全关闭。搜索失败会写 miss 标记，24 小时内不再重试，避免拖慢抽签。
+
+Markdown 平台不会下载图片，而是用 `resolve_url()` 只取公网地址写进 `![]()`，地址缓存在 `image_cache/image_urls.json`。
 
 ## 关于「抽来抽去就那几个」
 
@@ -198,7 +243,7 @@ data/plugin_data/astrbot_plugin_universe/
 ├── gal.json        # 角色与圣地数据（原子写入）
 ├── state.json      # 每日重抽计数（按天自动清理）
 ├── images/         # 自定义立绘，优先级最高
-└── image_cache/    # 立绘缓存 + bgm_pool.json（镜像角色池缓存）
+└── image_cache/    # 立绘缓存 + bgm_pool.json + image_urls.json
 ```
 
 **不再写入插件目录**，插件升级/重装不会丢数据。备份直接拷 `gal.json` 即可。
@@ -250,7 +295,7 @@ core/parser.py        # 参数解析、长消息分段
 core/render.py        # 纯文本渲染
 core/theme.py         # 视觉常量（分隔线、签运、链接）
 assets/               # 内置初始数据
-tests/                # 单测（105 项）
+tests/                # 单测（111 项）
 ```
 
 ---

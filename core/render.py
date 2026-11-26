@@ -30,6 +30,77 @@ def card(header: str, body: Iterable[str], footer: Sequence[str] = ()) -> str:
 
 # ---------------- 今日老婆 ----------------
 
+DAILY_TITLE = "🌙 今日老婆"
+
+
+def _fortune_line(fortune: str, markdown: bool = False) -> str:
+    emoji, _ = fortune_style(fortune)
+    bar = fortune_bar(fortune)
+    return f"{emoji} **{fortune}** {bar}" if markdown else f"{emoji} {fortune} {bar}"
+
+
+def _daily_name(heroine: Heroine, markdown: bool = False) -> str:
+    if not markdown:
+        return heroine.label
+    return f"**{heroine.name}** · {heroine.work}" if heroine.work else f"**{heroine.name}**"
+
+
+def _daily_body_lines(
+    fortune: str,
+    advice: str,
+    spot: Spot | None,
+    link_style: str,
+    markdown: bool = False,
+) -> list[str]:
+    lines = [_fortune_line(fortune, markdown)]
+    if advice:
+        lines.append(f"> {advice}" if markdown else advice)
+    if spot is not None:
+        lines.append(f"📍 {spot.name}")
+        link = short_link(spot.link, link_style)
+        if link:
+            lines.append(f"[去萌娘百科看这条线]({link})" if markdown else link)
+    return lines
+
+
+def _daily_footer_lines(
+    date_key: str,
+    reroll: int,
+    can_reroll: bool,
+    spot: Spot | None,
+    spot_total: int,
+) -> list[str]:
+    tail = date_key + (f" · 第 {reroll + 1} 抽" if reroll else "")
+    hint = "换一位发 /换老婆" if can_reroll else "明天再来"
+    lines = [f"{tail} · {hint}"]
+    if spot is not None and spot_total > 1:
+        lines.append(f"这部作品还有 {spot_total} 处 · /圣地巡礼 {spot.work}")
+    return lines
+
+
+def daily_parts(
+    heroine: Heroine,
+    fortune: str,
+    advice: str,
+    date_key: str,
+    reroll: int = 0,
+    can_reroll: bool = True,
+    spot: Spot | None = None,
+    spot_total: int = 0,
+    link_style: str = "full",
+) -> tuple[str, str]:
+    """把卡片切成「名字前」与「名字后」两段，中间留给立绘。
+
+    OneBot 这类支持图文混排的平台用它实现「图片插在名字下面、只发一条消息」。
+    """
+    head = "\n".join([DAILY_TITLE, DIVIDER, _daily_name(heroine)])
+    tail = "\n".join(
+        _daily_body_lines(fortune, advice, spot, link_style)
+        + [DIVIDER]
+        + _daily_footer_lines(date_key, reroll, can_reroll, spot, spot_total)
+    )
+    return head, tail
+
 
 def daily_card(
     heroine: Heroine,
@@ -42,27 +113,40 @@ def daily_card(
     spot_total: int = 0,
     link_style: str = "full",
 ) -> str:
-    emoji, _ = fortune_style(fortune)
-    body = [
-        f"👤 {heroine.label}",
-        f"{emoji} {fortune} {fortune_bar(fortune)}",
-        f"📖 {advice}",
-    ]
-    if spot is not None:
-        body.append(f"🗺️ 圣地 · {spot.name}")
-        link = short_link(spot.link, link_style)
-        if link:
-            body.append(f"🔗 {link}")
+    head, tail = daily_parts(
+        heroine,
+        fortune,
+        advice,
+        date_key,
+        reroll=reroll,
+        can_reroll=can_reroll,
+        spot=spot,
+        spot_total=spot_total,
+        link_style=link_style,
+    )
+    return f"{head}\n{tail}"
 
-    tail = f"🕒 {date_key}" + (f" · 第 {reroll + 1} 抽" if reroll else "")
-    footer = [tail]
-    if can_reroll:
-        footer.append("💡 /换老婆 换一位")
-    else:
-        footer.append("💡 明天再来抽一次")
-    if spot is not None and spot_total > 1:
-        footer.append(f"💡 /圣地巡礼 {spot.work} 共 {spot_total} 处")
-    return card("🌙 今日 Gal 运势", body, footer)
+
+def daily_markdown(
+    heroine: Heroine,
+    fortune: str,
+    advice: str,
+    date_key: str,
+    reroll: int = 0,
+    can_reroll: bool = True,
+    spot: Spot | None = None,
+    spot_total: int = 0,
+    link_style: str = "full",
+    image_url: str = "",
+) -> str:
+    """QQ 官方等支持 Markdown 的平台用这一版：图片用 ``![](url)`` 内嵌在名字下面。"""
+    lines = [f"## {DAILY_TITLE}", _daily_name(heroine, markdown=True)]
+    if image_url:
+        lines.append(f"![{heroine.name}]({image_url})")
+    lines.extend(_daily_body_lines(fortune, advice, spot, link_style, markdown=True))
+    lines.append("***")
+    lines.extend(_daily_footer_lines(date_key, reroll, can_reroll, spot, spot_total))
+    return "\n".join(lines)
 
 
 # ---------------- 圣地 ----------------
@@ -136,11 +220,11 @@ def no_permission() -> str:
 
 def reroll_exhausted(limit: int) -> str:
     if limit <= 0:
-        return card("🚫 重抽功能已关闭", [], ["💡 管理员可在插件配置中开启"])
+        return card("🚫 换人功能已关闭", [], ["管理员可在插件配置里打开"])
     return card(
-        f"⏳ 今日重抽次数已用完（{limit}/{limit}）",
+        f"⏳ 今天的 {limit} 次换人用完了",
         [],
-        ["🌙 明天 00:00 刷新"],
+        ["明天 0 点刷新"],
     )
 
 

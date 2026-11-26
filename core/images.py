@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import tempfile
 import time
@@ -32,7 +33,7 @@ BGM_IMAGE_MIRRORS = (
 )
 """图片镜像：按顺序尝试，全部失败后回源官方。"""
 
-USER_AGENT = "CareGalUniverse/2.0.3 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
+USER_AGENT = "CareGalUniverse/2.0.5 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_BYTES = 8 * 1024 * 1024
 MISS_TTL = 86400
@@ -75,6 +76,9 @@ class ImageFetcher:
         self.mirrors = self._normalize_mirrors(mirrors)
         self.cache_seconds = max(1, int(cache_days)) * 86400
         self.timeout = max(1.0, float(timeout))
+        self.url_cache_path = self.cache_dir / "image_urls.json"
+        self._urls: dict[str, str] = {}
+        self._load_urls()
         self._locks: dict[str, asyncio.Lock] = {}
 
     # ---------------- 对外入口 ----------------
@@ -125,6 +129,66 @@ class ImageFetcher:
                 return await self._download(session, image_url, name)
         except Exception:
             return None
+
+    async def resolve_url(self, name: str, work: str = "", image_url: str = "") -> str:
+        """只拿图片的公网地址，不下载。
+
+        QQ 官方机器人的 Markdown 消息要 ``![](公网URL)`` 才能内嵌图片，
+        平台会自己去下载转存，所以这里只需要地址。
+        """
+        if image_url.startswith("http"):
+            return image_url
+        if not name.strip():
+            return ""
+
+        key = self._cache_prefix(name)
+        cached = self._urls.get(key)
+        if isinstance(cached, str) and cached.startswith("http"):
+            return cached
+
+        try:
+            import aiohttp
+        except ImportError:
+            return ""
+
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        headers = {"User-Agent": USER_AGENT, "Content-Type": "application/json"}
+        try:
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+                for base in self.api_candidates():
+                    url = await self._search_image_url(session, base, name)
+                    if url:
+                        self._urls[key] = url
+                        self._save_urls()
+                        return url
+        except Exception:
+            return ""
+        return ""
+
+    def _save_urls(self) -> None:
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(
+                dir=str(self.cache_dir), prefix=".urls-", suffix=".tmp"
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self._urls, f, ensure_ascii=False)
+            os.replace(tmp, self.url_cache_path)
+        except OSError:
+            pass
+
+    def _load_urls(self) -> None:
+        try:
+            data = json.loads(self.url_cache_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            self._urls = {}
+            return
+        if isinstance(data, dict):
+            self._urls = {
+                str(k): str(v) for k, v in data.items() if isinstance(v, str)
+            }
+        else:
+            self._urls = {}
 
     # ---------------- 本地 ----------------
 
