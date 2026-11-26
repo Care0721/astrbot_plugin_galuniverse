@@ -99,8 +99,6 @@ class GalUniversePlugin(Star):
         )
         self.legacy_data_dirs = self._legacy_data_dirs()
         self._lock = asyncio.Lock()
-        self._loaded = False
-        self._image_warned: set[str] = set()
 
     # ---------------- 生命周期 ----------------
 
@@ -116,7 +114,6 @@ class GalUniversePlugin(Star):
     async def _load_data(self, legacy_import: bool = False) -> str:
         async with self._lock:
             report = await asyncio.to_thread(self.store.load, legacy_import)
-            self._loaded = True
             # 旧插件名遗留的数据目录：幂等补录，避免改名后「老婆变少了」
             added_h, added_s = await asyncio.to_thread(
                 self.store.import_from_dirs, self.legacy_data_dirs

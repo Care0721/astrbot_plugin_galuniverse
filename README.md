@@ -267,7 +267,8 @@ data/plugin_data/astrbot_plugin_universe/
 
 ### 从 v1.x 升级
 
-首次启动会检测插件目录下的 `wives.txt` / `spots.txt` 并自动导入：
+仓库不再附带旧的 `wives.txt` / `spots.txt`（内容已清洗进 `assets/`），
+但首次启动仍会检测**你插件目录下**遗留的这两个文件并自动导入：
 
 - 自动去重（旧版 376 行女主 → 310 条，66 条重复被合并）；
 - 同一作品的多个地点全部保留（旧版用 dict 做索引，99 行只剩 52 条）；
@@ -291,29 +292,34 @@ AstrBot 的「更新」是按 `metadata.yaml` 里的 `name` 精确匹配已安�
 
 ---
 
-## 开发
+## 目录结构
 
-```bash
-cd astrbot_plugin_galuniverse
-python -m unittest discover -s tests -v
-```
-
-核心逻辑（`core/`）只依赖标准库，可脱离 AstrBot 单测。
+仓库只放运行期真正会被加载的文件：
 
 ```
 main.py               # 指令注册与路由
+__init__.py           # 包声明，保证相对导入可用
+metadata.yaml         # 插件元信息（name / version / repo）
 _conf_schema.json     # WebUI 配置 Schema
+requirements.txt      # 依赖声明（AstrBot 已内置）
 core/models.py        # 数据模型
 core/store.py         # 持久化、迁移、检索
 core/fortune.py       # 确定性抽签
 core/bgm.py           # Bangumi 镜像角色池
 core/images.py        # 立绘获取与多镜像兜底
 core/parser.py        # 参数解析、长消息分段
-core/render.py        # 纯文本渲染
+core/render.py        # 卡片渲染（纯文本 / Markdown）
 core/theme.py         # 视觉常量（分隔线、签运、链接）
-assets/               # 内置初始数据
-tests/                # 单测（127 项）
+assets/               # 内置初始数据（角色 / 圣地）
 ```
+
+单元测试只保留在本地开发目录，不进仓库（AstrBot 加载插件时用不到）：
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+核心逻辑（`core/`）只依赖标准库，可脱离 AstrBot 单测。
 
 ---
 

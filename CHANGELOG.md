@@ -1,5 +1,17 @@
 # Changelog
 
+## 仓库清理 — 2026-11-26
+
+- 仓库只保留运行期真正会被加载的文件（20 个）：
+  `main.py`、`__init__.py`、`metadata.yaml`、`_conf_schema.json`、`requirements.txt`、
+  `core/*.py`、`assets/*.json`、`README.md`、`CHANGELOG.md`、`LICENSE`、`.gitignore`。
+- 移除 `tests/`（127 项单测只保留在本地开发目录，AstrBot 加载插件时用不到），
+  并写进 `.gitignore`，避免以后误提交。
+- 移除 `wives.txt` / `spots.txt`：内容已清洗进 `assets/*.default.json`，
+  仓库里这两份是纯冗余；用户插件目录下遗留的同名文件仍会被自动导入。
+- 删掉 `core/__init__.py` 里没人用的再导出，以及 `main.py` 中两个只写不读的字段。
+- 无功能变更，版本仍为 v2.0.9。
+
 ## v2.0.9 — 2026-11-26
 
 ### 修复

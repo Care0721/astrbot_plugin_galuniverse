@@ -7,3 +7,6 @@ data/
 .DS_Store
 .idea/
 .vscode/
+
+# 单元测试只在本地保留，不随插件分发（AstrBot 加载插件时也用不到）
+tests/
