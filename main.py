@@ -536,7 +536,7 @@ class GalUniversePlugin(Star):
 
     @filter.command("今日老婆", alias={"今日运势", "抽老婆"})
     async def daily_wife(self, event: AstrMessageEvent):
-        """抽取今日 Gal 运势（同一天结果固定）"""
+        """Today's draw. Stable for the whole day."""
         try:
             if not bool(self._cfg("enable_daily_wife", True)):
                 async for msg in self._reply(
@@ -574,7 +574,7 @@ class GalUniversePlugin(Star):
 
     @filter.command("换老婆", alias={"重抽"})
     async def reroll(self, event: AstrMessageEvent):
-        """重新抽取今日角色（每日有限次）"""
+        """Reroll today's character. Limited uses per day."""
         try:
             if not bool(self._cfg("enable_daily_wife", True)):
                 async for msg in self._reply(
@@ -629,7 +629,7 @@ class GalUniversePlugin(Star):
 
     @filter.command("圣地巡礼", alias={"巡礼"})
     async def pilgrimage(self, event: AstrMessageEvent):
-        """查询某部作品的取景地，支持页码翻页"""
+        """Look up pilgrimage spots for a work, with paging."""
         try:
             if not bool(self._cfg("enable_pilgrimage", True)):
                 async for msg in self._reply(
@@ -687,7 +687,7 @@ class GalUniversePlugin(Star):
 
     @filter.command("圣地列表", alias={"巡礼列表"})
     async def spot_list(self, event: AstrMessageEvent):
-        """浏览已收录的作品清单"""
+        """List every work currently stored."""
         try:
             works = self.store.works()
             if not works:
@@ -713,7 +713,7 @@ class GalUniversePlugin(Star):
 
     @filter.command("gal", alias={"GAL", "Gal", "gal帮助"})
     async def gal(self, event: AstrMessageEvent):
-        """管理指令入口：/gal 帮助"""
+        """Admin entry point: /gal help."""
         try:
             body = strip_command(event.get_message_str(), "gal", "GAL", "Gal", "gal帮助")
             sub, rest = split_first(body)
@@ -742,7 +742,7 @@ class GalUniversePlugin(Star):
 
     @filter.command("重载Gal数据")
     async def legacy_reload(self, event: AstrMessageEvent):
-        """兼容旧版指令：重载数据"""
+        """Legacy command: reload data."""
         if not self._is_admin(event):
             async for msg in self._reply(event, render.no_permission()):
                 yield msg
