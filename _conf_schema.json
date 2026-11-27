@@ -65,8 +65,8 @@
   "image_api_bases": {
     "description": "Bangumi 接口地址（按顺序兜底）",
     "type": "list",
-    "default": ["https://bgmapi.sakuraspark.fun", "https://api.bgm.tv"],
-    "hint": "角色搜索与立绘查询接口，镜像优先、官方最后；清空则只用官方"
+    "default": ["https://bgmapi.sakuraspark.fun"],
+    "hint": "角色搜索与立绘查询接口，镜像优先；官方 api.bgm.tv 恒定追加在最后，无需手填"
   },
   "image_mirrors": {
     "description": "图片镜像站（按顺序兜底）",
@@ -85,6 +85,12 @@
     "options": ["per_user", "per_group", "global"],
     "labels": ["每个用户独立", "每个群统一", "全 Bot 统一"],
     "subtitles": ["同一用户当天结果固定", "同一群当天结果一致", "所有人当天抽到同一角色"]
+  },
+  "dedupe_across_users": {
+    "description": "同一天避免抽到别人抽过的角色",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后当天已被别人抽走的角色会跳过，群聊里不容易撞车；关闭则每人完全独立（撞车概率上升）"
   },
   "fortune_pool": {
     "description": "签运档位",

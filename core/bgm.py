@@ -18,6 +18,7 @@ import os
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 from .fortune import pick_index
@@ -25,18 +26,35 @@ from .models import Heroine
 from .store import name_key as _name_key
 from .store import norm as _norm
 
+BGM_API_BASE = "https://api.bgm.tv"
+"""Official API. Gets a shorter timeout, it is unreachable far more often."""
+
 POOL_FILE = "bgm_pool.json"
 WORKS_TTL = 7 * 86400
 """Character lists are cached for 7 days."""
 
-FAIL_TTL = 3600
-"""After a failure, back off for an hour instead of timing out every command."""
+BASE_COOLDOWN = 600
+"""Skip an API base for 10 minutes after it times out. The characters endpoint
+of the public mirror has been dead for hours at a time; without this every
+draw would sit through the same timeout."""
+
+FAIL_TTL = 600
+"""Back off for 10 minutes after a failure. An hour is too long: one bad
+request used to disable the mirror pool for the rest of the day."""
 
 MAX_ITEMS = 40
 """Cap per subject so the cache file stays small."""
 
 MIN_POOL = 6
 """Subjects with fewer usable characters are skipped, or the same face keeps showing up."""
+
+
+def _host(url: str) -> str:
+    """Bare host for log lines."""
+    try:
+        return urlparse(url).netloc or url
+    except Exception:
+        return url
 
 
 def _has_kana(text: str) -> bool:
@@ -79,11 +97,15 @@ class BangumiPool:
         self,
         cache_dir: Path,
         api_bases: list[str],
-        timeout: float = 3.5,
+        timeout: float = 7.0,
     ) -> None:
         self.path = Path(cache_dir) / POOL_FILE
         self.api_bases = [b.rstrip("/") for b in api_bases if str(b).strip()]
         self.timeout = max(1.0, float(timeout))
+        self.last_reason = ""
+        """Why the last API call failed. The caller logs it."""
+        self._cooldown: dict[str, float] = {}
+        """base -> timestamp until which it is skipped."""
         self._locks: dict[str, asyncio.Lock] = {}
         self.data: dict[str, dict[str, Any]] = {"works": {}, "picks": {}, "subjects": {}}
         self._load()
@@ -204,6 +226,11 @@ class BangumiPool:
 
     # ---------------- api ----------------
 
+    def _usable_bases(self) -> list[str]:
+        """Bases not cooling down. An empty list means give up immediately."""
+        now = time.time()
+        return [b for b in self.api_bases if self._cooldown.get(b, 0) <= now]
+
     async def _characters(self, work: str) -> list[dict[str, str]]:
         entry = self.data["works"].get(work)
         now = time.time()
@@ -246,12 +273,17 @@ class BangumiPool:
             return []
 
         headers = {
-            "User-Agent": "CareGalUniverse/2.1.2 (+https://github.com/Care0721/astrbot_plugin_galuniverse)",
+            "User-Agent": "CareGalUniverse/2.1.4 (+https://github.com/Care0721/astrbot_plugin_galuniverse)",
             "Content-Type": "application/json",
         }
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        # connect is capped separately: a dead mirror should fail fast,
+        # but the two chained requests need room to finish on a slow one.
+        # the official host gets a shorter budget, it is unreachable far more often
+        mirror_timeout = aiohttp.ClientTimeout(total=self.timeout, connect=5)
+        official_timeout = aiohttp.ClientTimeout(total=3, connect=3)
         subjects = self.data.setdefault("subjects", {})
-        for base in self.api_bases:
+        for base in self._usable_bases():
+            timeout = official_timeout if base == BGM_API_BASE else mirror_timeout
             try:
                 async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
                     subject_id = subjects.get(work)
@@ -262,10 +294,18 @@ class BangumiPool:
                     if not subject_id:
                         continue
                     items = await self._subject_characters(session, base, subject_id)
-            except Exception:
+            except asyncio.TimeoutError:
+                self.last_reason = f"{_host(base)} 响应超时"
+                self._cooldown[base] = time.time() + BASE_COOLDOWN
+                continue
+            except Exception as exc:
+                self.last_reason = f"{_host(base)} 连接失败（{type(exc).__name__}）"
+                self._cooldown[base] = time.time() + BASE_COOLDOWN
                 continue
             if items:
+                self.last_reason = ""
                 return items[:MAX_ITEMS]
+            self.last_reason = f"{_host(base)} 没有可用角色"
         return []
 
     async def _search_subject(self, session, base: str, work: str) -> int | None:

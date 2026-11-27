@@ -32,12 +32,12 @@ from .core.parser import chunk_text, normalize, parse_int, split_fields, split_f
 from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
-VERSION = "2.1.2"
+VERSION = "2.1.4"
 
 MARKDOWN_PLATFORMS = {"qq_official", "qq_official_webhook"}
 """Platforms with native markdown support."""
 
-MAX_CANDIDATES = 6
+MAX_CANDIDATES = 12
 """How many candidates one draw may try, skipping recent picks and missing art."""
 
 LEGACY_PLUGIN_NAMES = ("astrbot_plugin_galuniverse",)
@@ -98,11 +98,35 @@ class GalUniversePlugin(Star):
         )
         self.legacy_data_dirs = self._legacy_data_dirs()
         self._lock = asyncio.Lock()
+        self._pool_warned: set[str] = set()
+        """Subjects already reported as unreachable, so the log is not spammed."""
 
     # ---------------- lifecycle ----------------
 
     async def initialize(self) -> None:
         await self._load_data(legacy_import=bool(self._cfg("legacy_import", True)))
+        # probe the mirror once in the background: a dead endpoint gets put on
+        # cooldown before the first user asks, so nobody waits for the timeout
+        if self._mirror_pool_enabled():
+            try:
+                asyncio.create_task(self._warm_pool())
+            except Exception:
+                pass
+
+    async def _warm_pool(self) -> None:
+        """One cheap draw against the mirror, only to learn whether it works."""
+        try:
+            works = [name for name, _ in self.store.works()]
+            if not works:
+                return
+            await self.pool.draw(works[0], "warmup")
+            if self.pool.last_reason:
+                logger.info(
+                    f"[GalUniverse] 镜像接口暂不可用（{self.pool.last_reason}），"
+                    f"本次运行先用本地名单，10 分钟后自动重试"
+                )
+        except Exception:
+            pass
 
     async def terminate(self) -> None:
         try:
@@ -279,11 +303,32 @@ class GalUniversePlugin(Star):
         base_seed = daily_seed(scope_key, date_key, reroll)
         fortune = pick_fortune(base_seed, list(self._cfg("fortune_pool", []) or []))
         advice = pick_advice(base_seed, self._advice_pool())
-
         want_image = self._images_enabled()
+
+        # already locked earlier today -> reuse it, so the result never drifts
+        if reroll == 0:
+            locked = self.state.locked_pick(date_key, scope_key)
+            if locked:
+                kept = Heroine(
+                    name=str(locked.get("name") or ""),
+                    work=str(locked.get("work") or ""),
+                )
+                url = str(locked.get("image") or "")
+                if kept.name and not want_image:
+                    return kept, fortune, advice, url, None
+                if kept.name:
+                    path = await self._image_path(kept, url)
+                    if path is not None:
+                        return kept, fortune, advice, url, path
+                # the locked art is gone now, fall through and draw again
+
         # names drawn on previous days, skipped to stop the same few showing up
         avoid = self.state.recent_names(scope_key, exclude_date=date_key)
-        tries = MAX_CANDIDATES if want_image or avoid else 1
+        # names other users already got today, skipped to avoid collisions
+        taken: set[str] = set()
+        if bool(self._cfg("dedupe_across_users", True)):
+            taken = self.state.claimed_names(date_key, exclude_scope=scope_key)
+        tries = MAX_CANDIDATES if want_image or avoid or taken else 1
         fallback: tuple[Heroine, str] | None = None
 
         for attempt in range(tries):
@@ -295,17 +340,20 @@ class GalUniversePlugin(Star):
             if heroine is None:
                 continue
 
-            # skip recent names, but keep the last attempt so we never end up empty
-            if heroine.name in avoid and attempt < tries - 1:
+            # skip what someone else already took, and what this user drew recently;
+            # the last attempt ignores both so we never end up empty
+            if attempt < tries - 1 and (
+                heroine.name in taken or heroine.name in avoid
+            ):
                 continue
 
             if not want_image:
-                self.state.remember(scope_key, date_key, heroine.name)
+                self._lock_pick(scope_key, date_key, heroine, image_url)
                 return heroine, fortune, advice, image_url, None
 
             path = await self._image_path(heroine, image_url)
             if path is not None:
-                self.state.remember(scope_key, date_key, heroine.name)
+                self._lock_pick(scope_key, date_key, heroine, image_url)
                 return heroine, fortune, advice, image_url, path
             logger.info(
                 f"[GalUniverse] 「{heroine.name}」立绘拉取失败"
@@ -316,8 +364,20 @@ class GalUniversePlugin(Star):
 
         if fallback is None:
             return None, fortune, advice, "", None
-        self.state.remember(scope_key, date_key, fallback[0].name)
+        self._lock_pick(scope_key, date_key, fallback[0], fallback[1])
         return fallback[0], fortune, advice, fallback[1], None
+
+    def _lock_pick(
+        self, scope_key: str, date_key: str, heroine: Heroine, image_url: str = ""
+    ) -> None:
+        """Remember today's pick for this scope and the recent-draw history."""
+        try:
+            self.state.remember(scope_key, date_key, heroine.name)
+            self.state.lock_pick(
+                date_key, scope_key, heroine.name, heroine.work, image_url
+            )
+        except Exception as exc:
+            logger.warning(f"[GalUniverse] 记录抽取结果失败：{exc}")
 
     async def _pick_from_mirror(self, seed: str) -> tuple[Heroine | None, str]:
         """Draw from the mirror pool. Returns (None, "") when disabled or failed."""
@@ -333,7 +393,7 @@ class GalUniversePlugin(Star):
         works = [name for name, _ in self.store.works()]
         if not works:
             return None, ""
-        # one subject per draw; failures are cached for an hour so the next day picks another
+        # one subject per draw; failures are cached for 10 minutes so the next day picks another
         work = works[pick_index(f"{seed}|work", len(works))]
         try:
             got = await self.pool.draw(work, f"{seed}|{work}")
@@ -342,7 +402,16 @@ class GalUniversePlugin(Star):
             return None, ""
         # pool.draw returns None on failure, normalize it to a 2-tuple here
         # or the caller blows up unpacking it
-        return got if got else (None, "")
+        if got:
+            return got
+        # one line per subject per session, so the log stays readable
+        if work not in self._pool_warned and len(self._pool_warned) < 100:
+            self._pool_warned.add(work)
+            logger.info(
+                f"[GalUniverse] 镜像池「{work}」取不到角色"
+                f"（{self.pool.last_reason or '原因未知'}），本次回落本地名单"
+            )
+        return None, ""
 
     async def _image_path(self, heroine: Heroine, image_url: str = "") -> Path | None:
         """Fetch the art locally. Any failure returns None, the card still goes out.
@@ -879,6 +948,8 @@ class GalUniversePlugin(Star):
         single = "图文一条" if bool(self._cfg("single_message", True)) else "图文分两条"
         image_source = str(self._cfg("image_source", "auto") or "auto")
         upscale = "放大开" if bool(self._cfg("image_upscale", True)) else "放大关"
+        scope_mode = str(self._cfg("fortune_scope", "per_user") or "per_user")
+        dedupe = bool(self._cfg("dedupe_across_users", True))
 
         rows = [
             ("🧩 插件名", PLUGIN_NAME),
@@ -888,6 +959,7 @@ class GalUniversePlugin(Star):
             ("👤 名单", f"{stats['heroines']} 位"),
             ("🗺️ 圣地", f"{stats['spots']} 条 / {stats['works']} 部"),
             ("🎲 抽签来源", source),
+            ("🎯 抽签范围", f"{scope_mode} · 跨用户去重{'开' if dedupe else '关'}"),
             ("🖼️ 立绘来源", f"{image_source} · {upscale}"),
             ("💬 消息格式", f"{render_mode} · {single}"),
             ("🌐 接口", " → ".join(self.images.api_candidates())),
@@ -909,5 +981,7 @@ class GalUniversePlugin(Star):
                 warnings.append("立绘来源为 local 但 images/ 为空，抽签会因没图一直换人")
         if render_mode == "markdown":
             warnings.append("markdown 模式依赖平台下载外链图，QQ 可能显示「加载失败」，建议改 auto")
+        if scope_mode == "global":
+            warnings.append("抽签范围为 global，所有人当天抽到同一角色，属预期行为")
 
         return render.diagnose_card(rows, warnings)

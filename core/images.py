@@ -32,13 +32,21 @@ BGM_IMAGE_MIRRORS = (
 )
 """Image mirrors, tried in order, official host last."""
 
-USER_AGENT = "CareGalUniverse/2.1.2 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
+USER_AGENT = "CareGalUniverse/2.1.4 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_BYTES = 8 * 1024 * 1024
 MISS_TTL = 1800
 
 CACHE_VERSION = 2
 """Part of the cache filename. Bump it when the matching rules change."""
+
+
+def _host(url: str) -> str:
+    """Bare host for log lines, full urls are too noisy."""
+    try:
+        return urlparse(url).netloc or url
+    except Exception:
+        return url
 
 
 def to_mirror(url: str, mirror: str) -> str:
@@ -96,7 +104,7 @@ class ImageFetcher:
         local_dir: Path | None = None,
         source: str = "auto",
         cache_days: int = 30,
-        timeout: float = 6.0,
+        timeout: float = 10.0,
         api_bases: list[str] | str | None = None,
         api_base: str | None = None,
         mirrors: list[str] | str | None = None,
@@ -175,7 +183,7 @@ class ImageFetcher:
             import aiohttp
         except ImportError:
             return None
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        timeout = aiohttp.ClientTimeout(total=self.timeout, connect=5)
         headers = {"User-Agent": USER_AGENT}
         try:
             async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
@@ -204,7 +212,7 @@ class ImageFetcher:
         except ImportError:
             return ""
 
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        timeout = aiohttp.ClientTimeout(total=self.timeout, connect=5)
         headers = {"User-Agent": USER_AGENT, "Content-Type": "application/json"}
         try:
             async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
@@ -362,7 +370,7 @@ class ImageFetcher:
             self.last_reason = "缺少 aiohttp"
             return None
 
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        timeout = aiohttp.ClientTimeout(total=self.timeout, connect=5)
         headers = {"User-Agent": USER_AGENT, "Content-Type": "application/json"}
         try:
             async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
@@ -391,16 +399,19 @@ class ImageFetcher:
                 f"{base.rstrip('/')}/v0/search/characters?limit=5", json=payload
             ) as resp:
                 if resp.status != 200:
-                    self.last_reason = f"搜索接口 {base} 返回 {resp.status}"
+                    self.last_reason = f"{_host(base)} 返回 HTTP {resp.status}"
                     return []
                 data = await resp.json(content_type=None)
+        except asyncio.TimeoutError:
+            self.last_reason = f"{_host(base)} 响应超时"
+            return []
         except Exception as exc:
-            self.last_reason = f"搜索接口 {base} 异常：{exc}"
+            self.last_reason = f"{_host(base)} 连接失败（{type(exc).__name__}）"
             return []
 
         items = data.get("data") if isinstance(data, dict) else data
         if not isinstance(items, list) or not items:
-            self.last_reason = f"搜索接口 {base} 无结果"
+            self.last_reason = f"{_host(base)} 无搜索结果"
             return []
 
         target = name_key(name)

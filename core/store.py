@@ -444,6 +444,7 @@ class StateStore:
         self.path = Path(data_dir) / STATE_FILE
         self.data: dict[str, dict] = {}
         self.history: dict[str, list[dict]] = {}
+        self.picks: dict[str, dict[str, dict]] = {}
         self.load()
 
     def load(self) -> None:
@@ -453,7 +454,7 @@ class StateStore:
             with self.path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-            self.data, self.history = {}, {}
+            self.data, self.history, self.picks = {}, {}, {}
             return
         if not isinstance(data, dict):
             return
@@ -466,12 +467,24 @@ class StateStore:
                 for k, v in raw_history.items()
                 if isinstance(v, list)
             }
+        raw_picks = data.get("picks")
+        if isinstance(raw_picks, dict):
+            self.picks = {
+                str(day): {
+                    str(scope): item
+                    for scope, item in entries.items()
+                    if isinstance(item, dict)
+                }
+                for day, entries in raw_picks.items()
+                if isinstance(entries, dict)
+            }
 
     def save(self, today: str | None = None) -> None:
         """Pass today in the configured timezone; server local time would prune the wrong rows."""
         keep = today or time.strftime("%Y-%m-%d")
         # keep today only, otherwise the file grows forever
         self.data = {k: v for k, v in self.data.items() if v.get("date") == keep}
+        self.picks = {k: v for k, v in self.picks.items() if k == keep}
         # keep just the tail of the draw history
         self.history = {
             k: v[-RECENT_KEEP:] for k, v in self.history.items() if v
@@ -481,7 +494,9 @@ class StateStore:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(
-                    {"users": self.data, "history": self.history}, f, ensure_ascii=False
+                    {"users": self.data, "history": self.history, "picks": self.picks},
+                    f,
+                    ensure_ascii=False,
                 )
             os.replace(tmp, self.path)
         except BaseException:
@@ -518,4 +533,41 @@ class StateStore:
         entries = self.history.setdefault(scope, [])
         entries.append({"date": date, "name": name})
         self.history[scope] = entries[-RECENT_KEEP:]
+        self.save(date)
+
+    # ---------------- today's picks ----------------
+
+    def locked_pick(self, date: str, scope: str) -> dict | None:
+        """The pick already locked for this scope today.
+
+        Once a user gets a character it stays theirs for the day, so later
+        calls cannot drift just because other users claimed something.
+        """
+        entry = self.picks.get(date)
+        if not isinstance(entry, dict):
+            return None
+        item = entry.get(scope)
+        if isinstance(item, dict) and item.get("name"):
+            return item
+        return None
+
+    def claimed_names(self, date: str, exclude_scope: str = "") -> set[str]:
+        """Names already taken by other scopes today, used to avoid collisions."""
+        entry = self.picks.get(date) or {}
+        return {
+            str(item.get("name"))
+            for scope, item in entry.items()
+            if scope != exclude_scope and isinstance(item, dict) and item.get("name")
+        }
+
+    def lock_pick(
+        self, date: str, scope: str, name: str, work: str = "", image: str = ""
+    ) -> None:
+        if not name:
+            return
+        self.picks.setdefault(date, {})[scope] = {
+            "name": name,
+            "work": work,
+            "image": image,
+        }
         self.save(date)
