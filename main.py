@@ -32,7 +32,7 @@ from .core.parser import chunk_text, normalize, parse_int, split_fields, split_f
 from .core.store import GalStore, StateStore, norm
 
 PLUGIN_NAME = "astrbot_plugin_universe"
-VERSION = "2.1.1"
+VERSION = "2.1.2"
 
 MARKDOWN_PLATFORMS = {"qq_official", "qq_official_webhook"}
 """Platforms with native markdown support."""
@@ -351,10 +351,12 @@ class GalUniversePlugin(Star):
         name search. Scoping to the subject first is what keeps same-name
         characters from getting the wrong picture.
         """
-        if not self._images_enabled():
+        source = str(self._cfg("image_source", "auto") or "auto")
+        if source == "off":
             return None
         url = image_url
-        if not url and heroine.work:
+        # local mode must stay offline, otherwise every draw pays a request
+        if not url and heroine.work and source != "local":
             try:
                 url = await self.pool.find_image(heroine.work, heroine.name)
             except Exception:
@@ -872,9 +874,11 @@ class GalUniversePlugin(Star):
 
         mode = str(self._cfg("pool_source", "hybrid") or "hybrid").strip().lower()
         ratio = parse_int(self._cfg("bangumi_ratio", 50), 50)
-        source = f"{mode}（镜像占比 {ratio}%）"
+        source = f"{mode}（镜像占比 {ratio}%）" if mode == "hybrid" else mode
         render_mode = str(self._cfg("render_mode", "auto") or "auto").strip().lower()
         single = "图文一条" if bool(self._cfg("single_message", True)) else "图文分两条"
+        image_source = str(self._cfg("image_source", "auto") or "auto")
+        upscale = "放大开" if bool(self._cfg("image_upscale", True)) else "放大关"
 
         rows = [
             ("🧩 插件名", PLUGIN_NAME),
@@ -884,9 +888,10 @@ class GalUniversePlugin(Star):
             ("👤 名单", f"{stats['heroines']} 位"),
             ("🗺️ 圣地", f"{stats['spots']} 条 / {stats['works']} 部"),
             ("🎲 抽签来源", source),
+            ("🖼️ 立绘来源", f"{image_source} · {upscale}"),
             ("💬 消息格式", f"{render_mode} · {single}"),
             ("🌐 接口", " → ".join(self.images.api_candidates())),
-            ("🖼️ 图片镜像", f"{len(self.images.mirrors)} 个"),
+            ("🔧 图片镜像", f"{len(self.images.mirrors)} 个"),
         ]
 
         # leftover dir from the rename: AstrBot would load both copies
@@ -898,5 +903,11 @@ class GalUniversePlugin(Star):
             warnings.append(f"旧数据目录 {directory.name} 已补录，可手动清理")
         if stats["heroines"] < 50:
             warnings.append("名单少于 50 位，抽签容易重复，建议 /gal 导入 或检查数据文件")
+        if image_source == "local":
+            local_dir = self.data_dir / "images"
+            if not local_dir.is_dir() or not any(local_dir.iterdir()):
+                warnings.append("立绘来源为 local 但 images/ 为空，抽签会因没图一直换人")
+        if render_mode == "markdown":
+            warnings.append("markdown 模式依赖平台下载外链图，QQ 可能显示「加载失败」，建议改 auto")
 
         return render.diagnose_card(rows, warnings)

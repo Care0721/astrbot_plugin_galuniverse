@@ -32,7 +32,7 @@ BGM_IMAGE_MIRRORS = (
 )
 """Image mirrors, tried in order, official host last."""
 
-USER_AGENT = "CareGalUniverse/2.1.1 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
+USER_AGENT = "CareGalUniverse/2.1.2 (https://github.com/Care0721/astrbot_plugin_galuniverse)"
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_BYTES = 8 * 1024 * 1024
 MISS_TTL = 1800
